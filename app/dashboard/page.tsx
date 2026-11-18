@@ -51,6 +51,15 @@ const mascaraMoeda = (valor: string) => {
   return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
 };
 
+// Máscara automática para formatar DIA/MÊS (ex: 25/11)
+const mascaraDiaMes = (valor: string) => {
+  const apenasNumeros = valor.replace(/\D/g, '').slice(0, 4);
+  if (apenasNumeros.length >= 3) {
+    return `${apenasNumeros.slice(0, 2)}/${apenasNumeros.slice(2)}`;
+  }
+  return apenasNumeros;
+};
+
 const IconeCheck = () => <svg className="w-3.5 h-3.5 text-green-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>;
 const IconeCancel = () => <svg className="w-3.5 h-3.5 text-red-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>;
 const IconeLivro = () => <svg className="w-3.5 h-3.5 text-gray-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>;
@@ -94,8 +103,10 @@ export default function Dashboard() {
   const valorInicialOS = {
     cliente: "", endereco: "", clienteFinal: "", dataInstalacao: "", instalador: "", obs: "",
     modulos: "", inversor: "", notaTecnica: "", receita: "",
-    valorCA: "", caCheck: false, valorPS: "", psCheck1: false, psCheck2: false,
-    valorUS: "", usCheck: false, valorDMS: "", dmsCheck: false, numeroOS: 0
+    valorCA: "", caCheck: false, dataCA1: "", dataCA2: "",
+    valorPS: "", psCheck1: false, psCheck2: false, dataPS1: "", dataPS2: "",
+    valorUS: "", usCheck: false, dataUS1: "", dataUS2: "",
+    valorDMS: "", dmsCheck: false, numeroOS: 0
   };
 
   const [novaOS, setNovaOS] = useState(valorInicialOS);
@@ -189,7 +200,7 @@ export default function Dashboard() {
   };
 
   const abrirEdicaoOS = (os: any) => {
-    setNovaOS(os);
+    setNovaOS({ ...valorInicialOS, ...os });
     setEditandoId(os.id);
     setModalAberto(true);
   };
@@ -391,21 +402,70 @@ export default function Dashboard() {
             <p><span className="font-semibold">Inversor:</span> {os.inversor}</p>
             <p><span className="font-semibold">Nota Técnica:</span> {os.notaTecnica}</p>
             
-            <div className="flex items-center gap-1 mt-1 border-t pt-1">
-              <input type="checkbox" checked={os.caCheck} onChange={() => toggleCheckboxCard(os.id, "caCheck", os.caCheck)} className="w-3 h-3" />
-              <p><span className="font-semibold">Valor CA:</span> R$ {os.valorCA || "0,00"}</p>
+            {/* Linha Valor CA + Datas */}
+            <div className="flex items-center justify-between gap-1 mt-1 border-t pt-1">
+              <div className="flex items-center gap-1 truncate">
+                <input type="checkbox" checked={!!os.caCheck} onChange={() => toggleCheckboxCard(os.id, "caCheck", !!os.caCheck)} className="w-3 h-3 shrink-0" />
+                <p className="truncate"><span className="font-semibold">Valor CA:</span> R$ {os.valorCA || "0,00"}</p>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {os.dataCA1 && (
+                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                    {os.dataCA1}
+                  </span>
+                )}
+                {os.dataCA2 && (
+                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                    {os.dataCA2}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <input type="checkbox" title="PS 1" checked={os.psCheck1} onChange={() => toggleCheckboxCard(os.id, "psCheck1", os.psCheck1)} className="w-3 h-3" />
-              <input type="checkbox" title="PS 2" checked={os.psCheck2} onChange={() => toggleCheckboxCard(os.id, "psCheck2", os.psCheck2)} className="w-3 h-3" />
-              <p><span className="font-semibold">Valor PS:</span> R$ {os.valorPS || "0,00"}</p>
+
+            {/* Linha Valor PS + Datas */}
+            <div className="flex items-center justify-between gap-1">
+              <div className="flex items-center gap-1 truncate">
+                <input type="checkbox" title="PS 1" checked={!!os.psCheck1} onChange={() => toggleCheckboxCard(os.id, "psCheck1", !!os.psCheck1)} className="w-3 h-3 shrink-0" />
+                <input type="checkbox" title="PS 2" checked={!!os.psCheck2} onChange={() => toggleCheckboxCard(os.id, "psCheck2", !!os.psCheck2)} className="w-3 h-3 shrink-0" />
+                <p className="truncate"><span className="font-semibold">Valor PS:</span> R$ {os.valorPS || "0,00"}</p>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {os.dataPS1 && (
+                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.psCheck1 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                    {os.dataPS1}
+                  </span>
+                )}
+                {os.dataPS2 && (
+                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.psCheck2 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                    {os.dataPS2}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <input type="checkbox" checked={os.usCheck} onChange={() => toggleCheckboxCard(os.id, "usCheck", os.usCheck)} className="w-3 h-3" />
-              <p><span className="font-semibold">Valor US:</span> R$ {os.valorUS || "0,00"}</p>
+
+            {/* Linha Valor US + Datas */}
+            <div className="flex items-center justify-between gap-1">
+              <div className="flex items-center gap-1 truncate">
+                <input type="checkbox" checked={!!os.usCheck} onChange={() => toggleCheckboxCard(os.id, "usCheck", !!os.usCheck)} className="w-3 h-3 shrink-0" />
+                <p className="truncate"><span className="font-semibold">Valor US:</span> R$ {os.valorUS || "0,00"}</p>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {os.dataUS1 && (
+                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                    {os.dataUS1}
+                  </span>
+                )}
+                {os.dataUS2 && (
+                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                    {os.dataUS2}
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* Linha Valor DMS */}
             <div className="flex items-center gap-1">
-              <input type="checkbox" checked={os.dmsCheck} onChange={() => toggleCheckboxCard(os.id, "dmsCheck", os.dmsCheck)} className="w-3 h-3" />
+              <input type="checkbox" checked={!!os.dmsCheck} onChange={() => toggleCheckboxCard(os.id, "dmsCheck", !!os.dmsCheck)} className="w-3 h-3 shrink-0" />
               <p><span className="font-semibold">Valor DMS:</span> R$ {os.valorDMS || "0,00"}</p>
             </div>
             <p className="font-bold text-green-700 mt-1"><span className="font-semibold text-gray-700">Receita:</span> R$ {os.receita || "0,00"}</p>
@@ -677,18 +737,38 @@ export default function Dashboard() {
                 <input placeholder="Nota Técnica" className="border p-1.5 rounded text-black" value={novaOS.notaTecnica} onChange={e => setNovaOS({...novaOS, notaTecnica: e.target.value})} />
                 <textarea placeholder="Observações" className="border p-1.5 rounded md:col-span-2 text-black" rows={2} value={novaOS.obs} onChange={e => setNovaOS({...novaOS, obs: e.target.value})} />
                 
-                <div className="md:col-span-2 mt-2 font-bold text-blue-800 border-b pb-1">Financeiro (Formatado em R$)</div>
+                <div className="md:col-span-2 mt-2 font-bold text-blue-800 border-b pb-1">Financeiro (Formatado em R$) e Vencimentos (DD/MM)</div>
                 
-                <div className="flex items-center gap-2"><input type="checkbox" checked={novaOS.caCheck} onChange={e => setNovaOS({...novaOS, caCheck: e.target.checked})} className="w-4 h-4"/><input placeholder="Valor CA" className="border p-1.5 rounded w-full text-black" value={novaOS.valorCA} onChange={e => setNovaOS({...novaOS, valorCA: mascaraMoeda(e.target.value)})} /></div>
-                
-                <div className="flex items-center gap-1">
-                  <input type="checkbox" title="PS 1" checked={novaOS.psCheck1} onChange={e => setNovaOS({...novaOS, psCheck1: e.target.checked})} className="w-4 h-4"/>
-                  <input type="checkbox" title="PS 2" checked={novaOS.psCheck2} onChange={e => setNovaOS({...novaOS, psCheck2: e.target.checked})} className="w-4 h-4"/>
-                  <input placeholder="Valor PS" className="border p-1.5 rounded w-full text-black" value={novaOS.valorPS} onChange={e => setNovaOS({...novaOS, valorPS: mascaraMoeda(e.target.value)})} />
+                {/* Campo Valor CA + 2 Datas */}
+                <div className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={novaOS.caCheck} onChange={e => setNovaOS({...novaOS, caCheck: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input placeholder="Valor CA" className="border p-1.5 rounded w-full text-black" value={novaOS.valorCA} onChange={e => setNovaOS({...novaOS, valorCA: mascaraMoeda(e.target.value)})} />
+                  <input placeholder="DD/MM" maxLength={5} title="Vencimento CA 1" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataCA1 || ""} onChange={e => setNovaOS({...novaOS, dataCA1: mascaraDiaMes(e.target.value)})} />
+                  <input placeholder="DD/MM" maxLength={5} title="Vencimento CA 2" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataCA2 || ""} onChange={e => setNovaOS({...novaOS, dataCA2: mascaraDiaMes(e.target.value)})} />
                 </div>
                 
-                <div className="flex items-center gap-2"><input type="checkbox" checked={novaOS.usCheck} onChange={e => setNovaOS({...novaOS, usCheck: e.target.checked})} className="w-4 h-4"/><input placeholder="Valor US" className="border p-1.5 rounded w-full text-black" value={novaOS.valorUS} onChange={e => setNovaOS({...novaOS, valorUS: mascaraMoeda(e.target.value)})} /></div>
-                <div className="flex items-center gap-2"><input type="checkbox" checked={novaOS.dmsCheck} onChange={e => setNovaOS({...novaOS, dmsCheck: e.target.checked})} className="w-4 h-4"/><input placeholder="Valor DMS" className="border p-1.5 rounded w-full text-black" value={novaOS.valorDMS} onChange={e => setNovaOS({...novaOS, valorDMS: mascaraMoeda(e.target.value)})} /></div>
+                {/* Campo Valor PS + 2 Datas */}
+                <div className="flex items-center gap-1">
+                  <input type="checkbox" title="PS 1" checked={novaOS.psCheck1} onChange={e => setNovaOS({...novaOS, psCheck1: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input type="checkbox" title="PS 2" checked={novaOS.psCheck2} onChange={e => setNovaOS({...novaOS, psCheck2: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input placeholder="Valor PS" className="border p-1.5 rounded w-full text-black" value={novaOS.valorPS} onChange={e => setNovaOS({...novaOS, valorPS: mascaraMoeda(e.target.value)})} />
+                  <input placeholder="DD/MM" maxLength={5} title="Vencimento PS 1" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataPS1 || ""} onChange={e => setNovaOS({...novaOS, dataPS1: mascaraDiaMes(e.target.value)})} />
+                  <input placeholder="DD/MM" maxLength={5} title="Vencimento PS 2" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataPS2 || ""} onChange={e => setNovaOS({...novaOS, dataPS2: mascaraDiaMes(e.target.value)})} />
+                </div>
+                
+                {/* Campo Valor US + 2 Datas */}
+                <div className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={novaOS.usCheck} onChange={e => setNovaOS({...novaOS, usCheck: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input placeholder="Valor US" className="border p-1.5 rounded w-full text-black" value={novaOS.valorUS} onChange={e => setNovaOS({...novaOS, valorUS: mascaraMoeda(e.target.value)})} />
+                  <input placeholder="DD/MM" maxLength={5} title="Vencimento US 1" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataUS1 || ""} onChange={e => setNovaOS({...novaOS, dataUS1: mascaraDiaMes(e.target.value)})} />
+                  <input placeholder="DD/MM" maxLength={5} title="Vencimento US 2" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataUS2 || ""} onChange={e => setNovaOS({...novaOS, dataUS2: mascaraDiaMes(e.target.value)})} />
+                </div>
+
+                {/* Campo Valor DMS */}
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={novaOS.dmsCheck} onChange={e => setNovaOS({...novaOS, dmsCheck: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input placeholder="Valor DMS" className="border p-1.5 rounded w-full text-black" value={novaOS.valorDMS} onChange={e => setNovaOS({...novaOS, valorDMS: mascaraMoeda(e.target.value)})} />
+                </div>
                 
                 <input placeholder="Receita Total" className="border p-1.5 rounded md:col-span-2 bg-green-50 font-bold text-black" value={novaOS.receita} onChange={e => setNovaOS({...novaOS, receita: mascaraMoeda(e.target.value)})} />
               </div>
