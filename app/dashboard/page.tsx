@@ -41,14 +41,22 @@ const formatarDataHora = (isoStr: string) => {
 const parseMonetario = (valor: string | number) => {
   if (!valor) return 0;
   if (typeof valor === "number") return valor;
-  return parseFloat(valor.toString().replace(/\./g, '').replace(",", ".")) || 0;
+  const str = valor.toString().trim();
+  if (str.includes(",")) {
+    return parseFloat(str.replace(/\./g, "").replace(",", ".")) || 0;
+  }
+  return parseFloat(str) || 0;
+};
+
+const formatarMoedaBR = (num: number) => {
+  return new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
 };
 
 const mascaraMoeda = (valor: string) => {
   const apenasNumeros = valor.replace(/\D/g, '');
   if (!apenasNumeros) return '';
   const num = parseFloat(apenasNumeros) / 100;
-  return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+  return formatarMoedaBR(num);
 };
 
 // Máscara automática para formatar DIA/MÊS (ex: 25/11)
@@ -111,9 +119,9 @@ export default function Dashboard() {
   const valorInicialOS = {
     cliente: "", endereco: "", clienteFinal: "", dataInstalacao: "", instalador: "", obs: "",
     modulos: "", inversor: "", notaTecnica: "", receita: "",
-    valorCA: "", caCheck: false, dataCA1: "", dataCA2: "",
+    valorCA: "", caCheck: false, caCheck1: false, caCheck2: false, dataCA1: "", dataCA2: "",
     valorPS: "", psCheck1: false, psCheck2: false, dataPS1: "", dataPS2: "",
-    valorUS: "", usCheck: false, dataUS1: "", dataUS2: "",
+    valorUS: "", usCheck: false, usCheck1: false, usCheck2: false, dataUS1: "", dataUS2: "",
     valorDMS: "", dmsCheck: false, numeroOS: 0
   };
 
@@ -208,7 +216,14 @@ export default function Dashboard() {
   };
 
   const abrirEdicaoOS = (os: any) => {
-    setNovaOS({ ...valorInicialOS, ...os });
+    setNovaOS({
+      ...valorInicialOS,
+      ...os,
+      caCheck1: os.caCheck1 ?? os.caCheck ?? false,
+      caCheck2: os.caCheck2 ?? os.caCheck ?? false,
+      usCheck1: os.usCheck1 ?? os.usCheck ?? false,
+      usCheck2: os.usCheck2 ?? os.usCheck ?? false,
+    });
     setEditandoId(os.id);
     setModalAberto(true);
   };
@@ -367,7 +382,7 @@ export default function Dashboard() {
   };
   const proximasInstalacoes = getProximasInstalacoes();
 
-  // Filtra os vencimentos em aberto (não marcados no checkbox) para PS, US ou CA
+  // Filtra os vencimentos em aberto (não marcados no checkbox) para PS, US ou CA e divide o valor total por 2
   const getVencimentosAbertos = (tipo: "PS" | "US" | "CA" | null) => {
     if (!tipo) return [];
     const osAtivas = listaOS.filter(os => os.etapa !== "Cancelada");
@@ -375,29 +390,32 @@ export default function Dashboard() {
 
     osAtivas.forEach(os => {
       if (tipo === "PS") {
+        const metadePS = formatarMoedaBR(parseMonetario(os.valorPS) / 2);
         if (os.dataPS1 && !os.psCheck1) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorPS || "0,00", dataVenc: os.dataPS1, parcela: "1º Venc. PS", campoCheck: "psCheck1", valorCheckAtual: !!os.psCheck1 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadePS, valorTotal: formatarMoedaBR(parseMonetario(os.valorPS)), dataVenc: os.dataPS1, parcela: "1ª Parcela (50%)", campoCheck: "psCheck1", valorCheckAtual: !!os.psCheck1 });
         }
         if (os.dataPS2 && !os.psCheck2) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorPS || "0,00", dataVenc: os.dataPS2, parcela: "2º Venc. PS", campoCheck: "psCheck2", valorCheckAtual: !!os.psCheck2 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadePS, valorTotal: formatarMoedaBR(parseMonetario(os.valorPS)), dataVenc: os.dataPS2, parcela: "2ª Parcela (50%)", campoCheck: "psCheck2", valorCheckAtual: !!os.psCheck2 });
         }
       } else if (tipo === "US") {
-        if (!os.usCheck) {
-          if (os.dataUS1) {
-            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorUS || "0,00", dataVenc: os.dataUS1, parcela: "1º Venc. US", campoCheck: "usCheck", valorCheckAtual: !!os.usCheck });
-          }
-          if (os.dataUS2) {
-            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorUS || "0,00", dataVenc: os.dataUS2, parcela: "2º Venc. US", campoCheck: "usCheck", valorCheckAtual: !!os.usCheck });
-          }
+        const metadeUS = formatarMoedaBR(parseMonetario(os.valorUS) / 2);
+        const checkUS1 = os.usCheck1 ?? os.usCheck ?? false;
+        const checkUS2 = os.usCheck2 ?? os.usCheck ?? false;
+        if (os.dataUS1 && !checkUS1) {
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeUS, valorTotal: formatarMoedaBR(parseMonetario(os.valorUS)), dataVenc: os.dataUS1, parcela: "1ª Parcela (50%)", campoCheck: "usCheck1", valorCheckAtual: !!checkUS1 });
+        }
+        if (os.dataUS2 && !checkUS2) {
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeUS, valorTotal: formatarMoedaBR(parseMonetario(os.valorUS)), dataVenc: os.dataUS2, parcela: "2ª Parcela (50%)", campoCheck: "usCheck2", valorCheckAtual: !!checkUS2 });
         }
       } else if (tipo === "CA") {
-        if (!os.caCheck) {
-          if (os.dataCA1) {
-            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorCA || "0,00", dataVenc: os.dataCA1, parcela: "1º Venc. CA", campoCheck: "caCheck", valorCheckAtual: !!os.caCheck });
-          }
-          if (os.dataCA2) {
-            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorCA || "0,00", dataVenc: os.dataCA2, parcela: "2º Venc. CA", campoCheck: "caCheck", valorCheckAtual: !!os.caCheck });
-          }
+        const metadeCA = formatarMoedaBR(parseMonetario(os.valorCA) / 2);
+        const checkCA1 = os.caCheck1 ?? os.caCheck ?? false;
+        const checkCA2 = os.caCheck2 ?? os.caCheck ?? false;
+        if (os.dataCA1 && !checkCA1) {
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeCA, valorTotal: formatarMoedaBR(parseMonetario(os.valorCA)), dataVenc: os.dataCA1, parcela: "1ª Parcela (50%)", campoCheck: "caCheck1", valorCheckAtual: !!checkCA1 });
+        }
+        if (os.dataCA2 && !checkCA2) {
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeCA, valorTotal: formatarMoedaBR(parseMonetario(os.valorCA)), dataVenc: os.dataCA2, parcela: "2ª Parcela (50%)", campoCheck: "caCheck2", valorCheckAtual: !!checkCA2 });
         }
       }
     });
@@ -410,6 +428,11 @@ export default function Dashboard() {
   const OsCard = ({ os }: { os: any }) => {
     const [expandido, setExpandido] = useState(false);
     const atrasada = isDataAtrasada(os.dataInstalacao);
+
+    const checkCA1 = os.caCheck1 ?? os.caCheck ?? false;
+    const checkCA2 = os.caCheck2 ?? os.caCheck ?? false;
+    const checkUS1 = os.usCheck1 ?? os.usCheck ?? false;
+    const checkUS2 = os.usCheck2 ?? os.usCheck ?? false;
 
     return (
       <div 
@@ -439,27 +462,28 @@ export default function Dashboard() {
             <p><span className="font-semibold">Inversor:</span> {os.inversor}</p>
             <p><span className="font-semibold">Nota Técnica:</span> {os.notaTecnica}</p>
             
-            {/* Linha Valor CA + Datas compactas */}
+            {/* Linha Valor CA + 2 Checkboxes e Datas compactas */}
             <div className="flex items-center justify-between gap-0.5 mt-1 border-t pt-1">
-              <div className="flex items-center gap-1 min-w-0">
-                <input type="checkbox" checked={!!os.caCheck} onChange={() => toggleCheckboxCard(os.id, "caCheck", !!os.caCheck)} className="w-3 h-3 shrink-0" />
-                <p className="text-[9.5px] tracking-tight whitespace-nowrap"><span className="font-semibold">Valor CA:</span> R$ {os.valorCA || "0,00"}</p>
+              <div className="flex items-center gap-0.5 min-w-0">
+                <input type="checkbox" title="CA 1" checked={!!checkCA1} onChange={() => toggleCheckboxCard(os.id, "caCheck1", !!checkCA1)} className="w-3 h-3 shrink-0" />
+                <input type="checkbox" title="CA 2" checked={!!checkCA2} onChange={() => toggleCheckboxCard(os.id, "caCheck2", !!checkCA2)} className="w-3 h-3 shrink-0" />
+                <p className="text-[9.5px] tracking-tight whitespace-nowrap ml-0.5"><span className="font-semibold">Valor CA:</span> R$ {os.valorCA || "0,00"}</p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {os.dataCA1 && (
-                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${checkCA1 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataCA1}
                   </span>
                 )}
                 {os.dataCA2 && (
-                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${checkCA2 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataCA2}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Linha Valor PS + Datas compactas */}
+            {/* Linha Valor PS + 2 Checkboxes e Datas compactas */}
             <div className="flex items-center justify-between gap-0.5">
               <div className="flex items-center gap-0.5 min-w-0">
                 <input type="checkbox" title="PS 1" checked={!!os.psCheck1} onChange={() => toggleCheckboxCard(os.id, "psCheck1", !!os.psCheck1)} className="w-3 h-3 shrink-0" />
@@ -480,20 +504,21 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Linha Valor US + Datas compactas */}
+            {/* Linha Valor US + 2 Checkboxes e Datas compactas */}
             <div className="flex items-center justify-between gap-0.5">
-              <div className="flex items-center gap-1 min-w-0">
-                <input type="checkbox" checked={!!os.usCheck} onChange={() => toggleCheckboxCard(os.id, "usCheck", !!os.usCheck)} className="w-3 h-3 shrink-0" />
-                <p className="text-[9.5px] tracking-tight whitespace-nowrap"><span className="font-semibold">Valor US:</span> R$ {os.valorUS || "0,00"}</p>
+              <div className="flex items-center gap-0.5 min-w-0">
+                <input type="checkbox" title="US 1" checked={!!checkUS1} onChange={() => toggleCheckboxCard(os.id, "usCheck1", !!checkUS1)} className="w-3 h-3 shrink-0" />
+                <input type="checkbox" title="US 2" checked={!!checkUS2} onChange={() => toggleCheckboxCard(os.id, "usCheck2", !!checkUS2)} className="w-3 h-3 shrink-0" />
+                <p className="text-[9.5px] tracking-tight whitespace-nowrap ml-0.5"><span className="font-semibold">Valor US:</span> R$ {os.valorUS || "0,00"}</p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {os.dataUS1 && (
-                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${checkUS1 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataUS1}
                   </span>
                 )}
                 {os.dataUS2 && (
-                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${checkUS2 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataUS2}
                   </span>
                 )}
@@ -697,7 +722,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* MODAL: VENCIMENTOS EM ABERTO (PS, US, CA) */}
+      {/* MODAL: VENCIMENTOS EM ABERTO (PS, US, CA) COM VALOR DIVIDIDO POR 2 */}
       {vencModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[70] text-sm">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl p-5 h-[80vh] flex flex-col">
@@ -715,7 +740,8 @@ export default function Dashboard() {
                     <th className="p-2 border-b">Vencimento (DD/MM)</th>
                     <th className="p-2 border-b">Referência</th>
                     <th className="p-2 border-b">OS / Cliente</th>
-                    <th className="p-2 border-b">Valor Total {vencModal}</th>
+                    <th className="p-2 border-b">Valor da Parcela (50%)</th>
+                    <th className="p-2 border-b text-gray-500">Total Lançado</th>
                     <th className="p-2 border-b">Etapa Atual</th>
                     <th className="p-2 border-b text-center">Dar Baixa (Pago)</th>
                   </tr>
@@ -729,10 +755,11 @@ export default function Dashboard() {
                         </span>
                       </td>
                       <td className="p-2 text-gray-600 font-semibold">{item.parcela}</td>
-                      <td className="p-2 font-bold text-blue-900 truncate max-w-[220px]" title={item.cliente}>
+                      <td className="p-2 font-bold text-blue-900 truncate max-w-[200px]" title={item.cliente}>
                         OS {item.numeroOS || "-"} - {item.cliente}
                       </td>
-                      <td className="p-2 font-bold text-red-700">R$ {item.valor}</td>
+                      <td className="p-2 font-bold text-red-700">R$ {item.valorParcela}</td>
+                      <td className="p-2 text-gray-500">R$ {item.valorTotal}</td>
                       <td className="p-2">
                         <span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600">
                           {item.etapa}
@@ -751,7 +778,7 @@ export default function Dashboard() {
                   ))}
                   {vencimentosAbertos.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-gray-500 italic">
+                      <td colSpan={7} className="p-8 text-center text-gray-500 italic">
                         Nenhum vencimento de {vencModal} em aberto no momento! Tudo pago ou sem data preenchida.
                       </td>
                     </tr>
@@ -854,26 +881,28 @@ export default function Dashboard() {
                 
                 <div className="md:col-span-2 mt-2 font-bold text-blue-800 border-b pb-1">Financeiro (Formatado em R$) e Vencimentos (DD/MM)</div>
                 
-                {/* Campo Valor CA + 2 Datas */}
-                <div className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={novaOS.caCheck} onChange={e => setNovaOS({...novaOS, caCheck: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                {/* Campo Valor CA + 2 Checkboxes e 2 Datas */}
+                <div className="flex items-center gap-1">
+                  <input type="checkbox" title="CA 1" checked={!!novaOS.caCheck1} onChange={e => setNovaOS({...novaOS, caCheck1: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input type="checkbox" title="CA 2" checked={!!novaOS.caCheck2} onChange={e => setNovaOS({...novaOS, caCheck2: e.target.checked})} className="w-4 h-4 shrink-0"/>
                   <input placeholder="Valor CA" className="border p-1.5 rounded w-full text-black" value={novaOS.valorCA} onChange={e => setNovaOS({...novaOS, valorCA: mascaraMoeda(e.target.value)})} />
                   <input placeholder="DD/MM" maxLength={5} title="Vencimento CA 1" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataCA1 || ""} onChange={e => setNovaOS({...novaOS, dataCA1: mascaraDiaMes(e.target.value)})} />
                   <input placeholder="DD/MM" maxLength={5} title="Vencimento CA 2" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataCA2 || ""} onChange={e => setNovaOS({...novaOS, dataCA2: mascaraDiaMes(e.target.value)})} />
                 </div>
                 
-                {/* Campo Valor PS + 2 Datas */}
+                {/* Campo Valor PS + 2 Checkboxes e 2 Datas */}
                 <div className="flex items-center gap-1">
-                  <input type="checkbox" title="PS 1" checked={novaOS.psCheck1} onChange={e => setNovaOS({...novaOS, psCheck1: e.target.checked})} className="w-4 h-4 shrink-0"/>
-                  <input type="checkbox" title="PS 2" checked={novaOS.psCheck2} onChange={e => setNovaOS({...novaOS, psCheck2: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input type="checkbox" title="PS 1" checked={!!novaOS.psCheck1} onChange={e => setNovaOS({...novaOS, psCheck1: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input type="checkbox" title="PS 2" checked={!!novaOS.psCheck2} onChange={e => setNovaOS({...novaOS, psCheck2: e.target.checked})} className="w-4 h-4 shrink-0"/>
                   <input placeholder="Valor PS" className="border p-1.5 rounded w-full text-black" value={novaOS.valorPS} onChange={e => setNovaOS({...novaOS, valorPS: mascaraMoeda(e.target.value)})} />
                   <input placeholder="DD/MM" maxLength={5} title="Vencimento PS 1" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataPS1 || ""} onChange={e => setNovaOS({...novaOS, dataPS1: mascaraDiaMes(e.target.value)})} />
                   <input placeholder="DD/MM" maxLength={5} title="Vencimento PS 2" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataPS2 || ""} onChange={e => setNovaOS({...novaOS, dataPS2: mascaraDiaMes(e.target.value)})} />
                 </div>
                 
-                {/* Campo Valor US + 2 Datas */}
-                <div className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={novaOS.usCheck} onChange={e => setNovaOS({...novaOS, usCheck: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                {/* Campo Valor US + 2 Checkboxes e 2 Datas */}
+                <div className="flex items-center gap-1">
+                  <input type="checkbox" title="US 1" checked={!!novaOS.usCheck1} onChange={e => setNovaOS({...novaOS, usCheck1: e.target.checked})} className="w-4 h-4 shrink-0"/>
+                  <input type="checkbox" title="US 2" checked={!!novaOS.usCheck2} onChange={e => setNovaOS({...novaOS, usCheck2: e.target.checked})} className="w-4 h-4 shrink-0"/>
                   <input placeholder="Valor US" className="border p-1.5 rounded w-full text-black" value={novaOS.valorUS} onChange={e => setNovaOS({...novaOS, valorUS: mascaraMoeda(e.target.value)})} />
                   <input placeholder="DD/MM" maxLength={5} title="Vencimento US 1" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataUS1 || ""} onChange={e => setNovaOS({...novaOS, dataUS1: mascaraDiaMes(e.target.value)})} />
                   <input placeholder="DD/MM" maxLength={5} title="Vencimento US 2" className="border p-1.5 rounded w-14 text-center text-black shrink-0" value={novaOS.dataUS2 || ""} onChange={e => setNovaOS({...novaOS, dataUS2: mascaraDiaMes(e.target.value)})} />
