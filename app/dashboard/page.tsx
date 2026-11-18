@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db, storage } from "../../lib/firebase"; // <- Importamos o storage aqui
+import { auth, db, storage } from "../../lib/firebase";
 import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
   collection, addDoc, onSnapshot, doc, updateDoc, arrayUnion, deleteDoc 
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; // <- Importamos as ferramentas de upload
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // Grades atualizadas e reordenadas
 const ETAPAS = [
@@ -60,6 +60,13 @@ const mascaraDiaMes = (valor: string) => {
   return apenasNumeros;
 };
 
+// Converte "DD/MM" em chave "MM-DD" para ordenar cronologicamente
+const chaveOrdenacaoDiaMes = (ddmm: string) => {
+  if (!ddmm || !ddmm.includes("/")) return "99-99";
+  const [d, m] = ddmm.split("/");
+  return `${ (m || "99").padStart(2, "0") }-${ (d || "99").padStart(2, "0") }`;
+};
+
 const IconeCheck = () => <svg className="w-3.5 h-3.5 text-green-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>;
 const IconeCancel = () => <svg className="w-3.5 h-3.5 text-red-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>;
 const IconeLivro = () => <svg className="w-3.5 h-3.5 text-gray-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>;
@@ -92,6 +99,7 @@ export default function Dashboard() {
   const [osStatusModal, setOsStatusModal] = useState<{ id: string, acao: string, data: string } | null>(null);
   const [dreModal, setDreModal] = useState(false);
   const [instModal, setInstModal] = useState(false);
+  const [vencModal, setVencModal] = useState<"PS" | "US" | "CA" | null>(null);
   
   const [dreStart, setDreStart] = useState("");
   const [dreEnd, setDreEnd] = useState("");
@@ -235,25 +243,16 @@ export default function Dashboard() {
     }
   };
 
-  // ----- FUNÇÃO DE UPLOAD REAL ATUALIZADA -----
   const enviarAnexo = async () => {
     if (arquivoSelecionado && osAnexos) {
-      setEnviandoAnexo(true); // Trava o botão e mostra "Enviando..."
+      setEnviandoAnexo(true);
       try {
         const arquivo = arquivoSelecionado;
         const nomeArquivo = arquivo.name;
-
-        // 1. Cria a referência da pasta e do arquivo lá no Storage do Google
-        // A estrutura será: anexos_os / ID_DA_OS / nome_do_arquivo.pdf
         const storageRef = ref(storage, `anexos_os/${osAnexos.id}/${nomeArquivo}`);
-
-        // 2. Faz o upload físico do arquivo para o Storage
         await uploadBytes(storageRef, arquivo);
-
-        // 3. Pega a URL pública (link) gerada pelo Storage para podermos baixar depois
         const urlDownload = await getDownloadURL(storageRef);
 
-        // 4. Salva os detalhes e o link no Firestore dentro da OS correta
         const novoAnexo = { 
           nome: nomeArquivo, 
           url: urlDownload, 
@@ -267,7 +266,6 @@ export default function Dashboard() {
           historico: arrayUnion(registrarAuditoria(`Anexou arquivo: ${nomeArquivo}`))
         });
         
-        // Atualiza a tela em tempo real
         setOsAnexos({ ...osAnexos, anexos: [...(osAnexos.anexos || []), novoAnexo] });
         setArquivoSelecionado(null);
       } catch (error) {
@@ -278,7 +276,6 @@ export default function Dashboard() {
       }
     }
   };
-  // ----------------------------------------------
 
   const toggleCheckboxCard = async (osId: string, campo: string, valorAtual: boolean) => {
     const osRef = doc(db, "ordens_servico", osId);
@@ -370,6 +367,46 @@ export default function Dashboard() {
   };
   const proximasInstalacoes = getProximasInstalacoes();
 
+  // Filtra os vencimentos em aberto (não marcados no checkbox) para PS, US ou CA
+  const getVencimentosAbertos = (tipo: "PS" | "US" | "CA" | null) => {
+    if (!tipo) return [];
+    const osAtivas = listaOS.filter(os => os.etapa !== "Cancelada");
+    const itens: any[] = [];
+
+    osAtivas.forEach(os => {
+      if (tipo === "PS") {
+        if (os.dataPS1 && !os.psCheck1) {
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorPS || "0,00", dataVenc: os.dataPS1, parcela: "1º Venc. PS", campoCheck: "psCheck1", valorCheckAtual: !!os.psCheck1 });
+        }
+        if (os.dataPS2 && !os.psCheck2) {
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorPS || "0,00", dataVenc: os.dataPS2, parcela: "2º Venc. PS", campoCheck: "psCheck2", valorCheckAtual: !!os.psCheck2 });
+        }
+      } else if (tipo === "US") {
+        if (!os.usCheck) {
+          if (os.dataUS1) {
+            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorUS || "0,00", dataVenc: os.dataUS1, parcela: "1º Venc. US", campoCheck: "usCheck", valorCheckAtual: !!os.usCheck });
+          }
+          if (os.dataUS2) {
+            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorUS || "0,00", dataVenc: os.dataUS2, parcela: "2º Venc. US", campoCheck: "usCheck", valorCheckAtual: !!os.usCheck });
+          }
+        }
+      } else if (tipo === "CA") {
+        if (!os.caCheck) {
+          if (os.dataCA1) {
+            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorCA || "0,00", dataVenc: os.dataCA1, parcela: "1º Venc. CA", campoCheck: "caCheck", valorCheckAtual: !!os.caCheck });
+          }
+          if (os.dataCA2) {
+            itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valor: os.valorCA || "0,00", dataVenc: os.dataCA2, parcela: "2º Venc. CA", campoCheck: "caCheck", valorCheckAtual: !!os.caCheck });
+          }
+        }
+      }
+    });
+
+    return itens.sort((a, b) => chaveOrdenacaoDiaMes(a.dataVenc).localeCompare(chaveOrdenacaoDiaMes(b.dataVenc)));
+  };
+
+  const vencimentosAbertos = getVencimentosAbertos(vencModal);
+
   const OsCard = ({ os }: { os: any }) => {
     const [expandido, setExpandido] = useState(false);
     const atrasada = isDataAtrasada(os.dataInstalacao);
@@ -402,61 +439,61 @@ export default function Dashboard() {
             <p><span className="font-semibold">Inversor:</span> {os.inversor}</p>
             <p><span className="font-semibold">Nota Técnica:</span> {os.notaTecnica}</p>
             
-            {/* Linha Valor CA + Datas */}
-            <div className="flex items-center justify-between gap-1 mt-1 border-t pt-1">
-              <div className="flex items-center gap-1 truncate">
+            {/* Linha Valor CA + Datas compactas */}
+            <div className="flex items-center justify-between gap-0.5 mt-1 border-t pt-1">
+              <div className="flex items-center gap-1 min-w-0">
                 <input type="checkbox" checked={!!os.caCheck} onChange={() => toggleCheckboxCard(os.id, "caCheck", !!os.caCheck)} className="w-3 h-3 shrink-0" />
-                <p className="truncate"><span className="font-semibold">Valor CA:</span> R$ {os.valorCA || "0,00"}</p>
+                <p className="text-[9.5px] tracking-tight whitespace-nowrap"><span className="font-semibold">Valor CA:</span> R$ {os.valorCA || "0,00"}</p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {os.dataCA1 && (
-                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataCA1}
                   </span>
                 )}
                 {os.dataCA2 && (
-                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.caCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataCA2}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Linha Valor PS + Datas */}
-            <div className="flex items-center justify-between gap-1">
-              <div className="flex items-center gap-1 truncate">
+            {/* Linha Valor PS + Datas compactas */}
+            <div className="flex items-center justify-between gap-0.5">
+              <div className="flex items-center gap-0.5 min-w-0">
                 <input type="checkbox" title="PS 1" checked={!!os.psCheck1} onChange={() => toggleCheckboxCard(os.id, "psCheck1", !!os.psCheck1)} className="w-3 h-3 shrink-0" />
                 <input type="checkbox" title="PS 2" checked={!!os.psCheck2} onChange={() => toggleCheckboxCard(os.id, "psCheck2", !!os.psCheck2)} className="w-3 h-3 shrink-0" />
-                <p className="truncate"><span className="font-semibold">Valor PS:</span> R$ {os.valorPS || "0,00"}</p>
+                <p className="text-[9.5px] tracking-tight whitespace-nowrap ml-0.5"><span className="font-semibold">Valor PS:</span> R$ {os.valorPS || "0,00"}</p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {os.dataPS1 && (
-                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.psCheck1 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.psCheck1 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataPS1}
                   </span>
                 )}
                 {os.dataPS2 && (
-                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.psCheck2 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.psCheck2 ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataPS2}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Linha Valor US + Datas */}
-            <div className="flex items-center justify-between gap-1">
-              <div className="flex items-center gap-1 truncate">
+            {/* Linha Valor US + Datas compactas */}
+            <div className="flex items-center justify-between gap-0.5">
+              <div className="flex items-center gap-1 min-w-0">
                 <input type="checkbox" checked={!!os.usCheck} onChange={() => toggleCheckboxCard(os.id, "usCheck", !!os.usCheck)} className="w-3 h-3 shrink-0" />
-                <p className="truncate"><span className="font-semibold">Valor US:</span> R$ {os.valorUS || "0,00"}</p>
+                <p className="text-[9.5px] tracking-tight whitespace-nowrap"><span className="font-semibold">Valor US:</span> R$ {os.valorUS || "0,00"}</p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {os.dataUS1 && (
-                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataUS1}
                   </span>
                 )}
                 {os.dataUS2 && (
-                  <span className={`text-[9px] px-1 py-[1px] rounded font-mono leading-none ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
+                  <span className={`text-[8px] px-0.5 py-[1px] rounded font-mono leading-none tracking-tighter ${os.usCheck ? "bg-gray-700 text-gray-300 line-through" : "bg-amber-100 text-amber-900 font-semibold border border-amber-300"}`}>
                     {os.dataUS2}
                   </span>
                 )}
@@ -466,7 +503,7 @@ export default function Dashboard() {
             {/* Linha Valor DMS */}
             <div className="flex items-center gap-1">
               <input type="checkbox" checked={!!os.dmsCheck} onChange={() => toggleCheckboxCard(os.id, "dmsCheck", !!os.dmsCheck)} className="w-3 h-3 shrink-0" />
-              <p><span className="font-semibold">Valor DMS:</span> R$ {os.valorDMS || "0,00"}</p>
+              <p className="text-[9.5px] tracking-tight"><span className="font-semibold">Valor DMS:</span> R$ {os.valorDMS || "0,00"}</p>
             </div>
             <p className="font-bold text-green-700 mt-1"><span className="font-semibold text-gray-700">Receita:</span> R$ {os.receita || "0,00"}</p>
           </div>
@@ -520,19 +557,31 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen bg-white font-sans text-xs">
       
-      <header className="bg-white shadow-sm border-b px-4 py-3 flex justify-between items-center shrink-0">
+      <header className="bg-white shadow-sm border-b px-4 py-2.5 flex flex-wrap justify-between items-center gap-2 shrink-0">
         <h1 className="text-lg font-bold text-gray-800">Controle de Operações</h1>
-        <div className="flex gap-3 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           
-          <button onClick={() => setInstModal(true)} className="bg-indigo-100 text-indigo-800 border border-indigo-300 px-3 py-1.5 rounded text-xs hover:bg-indigo-200 font-bold flex items-center gap-1 shadow-sm">
+          <button onClick={() => setInstModal(true)} className="bg-indigo-100 text-indigo-800 border border-indigo-300 px-2.5 py-1.5 rounded text-xs hover:bg-indigo-200 font-bold flex items-center gap-1 shadow-sm transition">
             📅 Prox. Instalações
           </button>
+
+          <button onClick={() => setVencModal("PS")} className="bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded text-xs hover:bg-amber-200 font-bold flex items-center gap-1 shadow-sm transition">
+            ⏳ Venc. PS
+          </button>
+
+          <button onClick={() => setVencModal("US")} className="bg-sky-100 text-sky-900 border border-sky-300 px-2.5 py-1.5 rounded text-xs hover:bg-sky-200 font-bold flex items-center gap-1 shadow-sm transition">
+            ⏳ Venc. US
+          </button>
+
+          <button onClick={() => setVencModal("CA")} className="bg-orange-100 text-orange-900 border border-orange-300 px-2.5 py-1.5 rounded text-xs hover:bg-orange-200 font-bold flex items-center gap-1 shadow-sm transition">
+            ⏳ Venc. CA
+          </button>
           
-          <button onClick={abrirDRE} className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded text-xs hover:bg-emerald-200 font-bold flex items-center gap-1 shadow-sm">
+          <button onClick={abrirDRE} className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1.5 rounded text-xs hover:bg-emerald-200 font-bold flex items-center gap-1 shadow-sm transition">
             📊 Gerar DRE
           </button>
           
-          <button onClick={() => { setNovaOS(valorInicialOS); setEditandoId(null); setModalAberto(true); }} className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs hover:bg-blue-700 font-bold shadow-sm">
+          <button onClick={() => { setNovaOS(valorInicialOS); setEditandoId(null); setModalAberto(true); }} className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs hover:bg-blue-700 font-bold shadow-sm transition">
             + Nova OS
           </button>
           
@@ -571,7 +620,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          <button onClick={fazerLogout} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs hover:bg-red-500 hover:text-white font-medium shadow-sm">
+          <button onClick={fazerLogout} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs hover:bg-red-500 hover:text-white font-medium shadow-sm transition">
             Sair
           </button>
         </div>
@@ -647,6 +696,72 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* MODAL: VENCIMENTOS EM ABERTO (PS, US, CA) */}
+      {vencModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[70] text-sm">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl p-5 h-[80vh] flex flex-col">
+            <div className="flex justify-between border-b pb-2 mb-4 shrink-0">
+              <h2 className="font-bold text-amber-900 text-lg">
+                ⏳ Vencimentos em Aberto — Valor {vencModal} ({vencimentosAbertos.length})
+              </h2>
+              <button onClick={() => setVencModal(null)} className="text-red-500 font-bold text-xl hover:scale-110">&times;</button>
+            </div>
+
+            <div className="overflow-x-auto flex-1 border border-amber-300 rounded shadow-sm">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-amber-100 text-amber-900 sticky top-0 shadow-sm">
+                  <tr>
+                    <th className="p-2 border-b">Vencimento (DD/MM)</th>
+                    <th className="p-2 border-b">Referência</th>
+                    <th className="p-2 border-b">OS / Cliente</th>
+                    <th className="p-2 border-b">Valor Total {vencModal}</th>
+                    <th className="p-2 border-b">Etapa Atual</th>
+                    <th className="p-2 border-b text-center">Dar Baixa (Pago)</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white">
+                  {vencimentosAbertos.map((item, idx) => (
+                    <tr key={`${item.id}-${idx}`} className="border-b hover:bg-gray-50 transition text-gray-800">
+                      <td className="p-2 font-bold whitespace-nowrap">
+                        <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-mono border border-amber-300">
+                          {item.dataVenc}
+                        </span>
+                      </td>
+                      <td className="p-2 text-gray-600 font-semibold">{item.parcela}</td>
+                      <td className="p-2 font-bold text-blue-900 truncate max-w-[220px]" title={item.cliente}>
+                        OS {item.numeroOS || "-"} - {item.cliente}
+                      </td>
+                      <td className="p-2 font-bold text-red-700">R$ {item.valor}</td>
+                      <td className="p-2">
+                        <span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600">
+                          {item.etapa}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleCheckboxCard(item.id, item.campoCheck, item.valorCheckAtual)}
+                          className="bg-green-100 text-green-800 border border-green-300 px-2 py-1 rounded text-[10px] font-bold hover:bg-green-600 hover:text-white transition"
+                        >
+                          ✓ Marcar Pago
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {vencimentosAbertos.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-gray-500 italic">
+                        Nenhum vencimento de {vencModal} em aberto no momento! Tudo pago ou sem data preenchida.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: PRÓXIMAS INSTALAÇÕES */}
       {instModal && (
@@ -968,7 +1083,6 @@ export default function Dashboard() {
               {osAnexos.anexos && osAnexos.anexos.length > 0 ? (
                 osAnexos.anexos.map((arq: any, i: number) => (
                   <div key={i} className="flex justify-between items-center bg-white p-2 rounded border shadow-sm">
-                    {/* Aqui transformamos o nome num link real para baixar o arquivo */}
                     <a 
                       href={arq.url} 
                       target="_blank" 
