@@ -375,9 +375,17 @@ export default function Dashboard() {
 
   const dre = calcularDRE();
 
+  // Filtra apenas os grids: Adiada, Aguardando Instalação, Compra CA e Envio de Projetos
   const getProximasInstalacoes = () => {
+    const etapasPermitidas = [
+      "Adiada",
+      "Aguardando Instalação",
+      "Compra CA",
+      "Envio de Projetos"
+    ];
+
     return listaOS
-      .filter(os => os.etapa !== "Finalizada" && os.etapa !== "Cancelada" && os.dataInstalacao)
+      .filter(os => etapasPermitidas.includes(os.etapa) && os.dataInstalacao)
       .sort((a, b) => a.dataInstalacao.localeCompare(b.dataInstalacao));
   };
   const proximasInstalacoes = getProximasInstalacoes();
@@ -795,7 +803,9 @@ export default function Dashboard() {
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[70] text-sm">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-5 h-[80vh] flex flex-col">
             <div className="flex justify-between border-b pb-2 mb-4 shrink-0">
-              <h2 className="font-bold text-indigo-800 text-lg">📅 Próximas Instalações (OS Ativas no Kanban)</h2>
+              <h2 className="font-bold text-indigo-800 text-lg">
+                📅 Próximas Instalações ({proximasInstalacoes.length})
+              </h2>
               <button onClick={() => setInstModal(false)} className="text-red-500 font-bold text-xl hover:scale-110">&times;</button>
             </div>
 
@@ -831,7 +841,7 @@ export default function Dashboard() {
                   {proximasInstalacoes.length === 0 && (
                     <tr>
                       <td colSpan={5} className="p-8 text-center text-gray-500 italic">
-                        Nenhuma instalação com data agendada nas OS ativas.
+                        Nenhuma instalação com data agendada nas etapas selecionadas.
                       </td>
                     </tr>
                   )}
