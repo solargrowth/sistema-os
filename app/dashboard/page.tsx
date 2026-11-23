@@ -464,7 +464,7 @@ export default function Dashboard() {
   ).sort((a, b) => a.localeCompare(b));
 
   const vencimentosAbertos = vencimentosAbertosBase.filter(item => {
-    if (filtroInstaladorVenc === "TODOS") return true;
+    if (vencModal !== "PS" || filtroInstaladorVenc === "TODOS") return true;
     return (item.instalador || "").trim().toLowerCase() === filtroInstaladorVenc.toLowerCase();
   });
 
@@ -945,19 +945,21 @@ export default function Dashboard() {
               </h2>
 
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded text-xs">
-                  <label className="font-bold text-amber-900">Filtrar Instalador:</label>
-                  <select
-                    value={filtroInstaladorVenc}
-                    onChange={(e) => setFiltroInstaladorVenc(e.target.value)}
-                    className="border border-amber-300 rounded px-2 py-0.5 bg-white text-black font-semibold"
-                  >
-                    <option value="TODOS">Todos ({vencimentosAbertosBase.length})</option>
-                    {instaladoresDisponiveisVenc.map((inst) => (
-                      <option key={inst} value={inst}>{inst}</option>
-                    ))}
-                  </select>
-                </div>
+                {vencModal === "PS" && (
+                  <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded text-xs">
+                    <label className="font-bold text-amber-900">Filtrar Instalador:</label>
+                    <select
+                      value={filtroInstaladorVenc}
+                      onChange={(e) => setFiltroInstaladorVenc(e.target.value)}
+                      className="border border-amber-300 rounded px-2 py-0.5 bg-white text-black font-semibold"
+                    >
+                      <option value="TODOS">Todos ({vencimentosAbertosBase.length})</option>
+                      {instaladoresDisponiveisVenc.map((inst) => (
+                        <option key={inst} value={inst}>{inst}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <button onClick={() => setVencModal(null)} className="text-red-500 font-bold text-xl hover:scale-110 ml-2">&times;</button>
               </div>
             </div>
