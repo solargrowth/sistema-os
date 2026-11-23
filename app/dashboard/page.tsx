@@ -83,6 +83,7 @@ const IconeClipe = () => <svg className="w-3.5 h-3.5 text-gray-800 hover:scale-1
 const IconeLapis = () => <svg className="w-3.5 h-3.5 text-orange-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>;
 const IconeLixeira = () => <svg className="w-3.5 h-3.5 text-red-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>;
 const IconeRepatriar = () => <svg className="w-3.5 h-3.5 text-gray-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>;
+const IconeLupa = () => <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>;
 
 export default function Dashboard() {
   const router = useRouter();
@@ -91,6 +92,10 @@ export default function Dashboard() {
   const [minimizados, setMinimizados] = useState<string[]>([]);
   const [notificacoesAbertas, setNotificacoesAbertas] = useState(false);
   const [ultimaNotificacaoLida, setUltimaNotificacaoLida] = useState<string | null>(null);
+  
+  // Busca Global (Lupa)
+  const [buscaModalAberto, setBuscaModalAberto] = useState(false);
+  const [termoBusca, setTermoBusca] = useState("");
   
   const [minFinalizadas, setMinFinalizadas] = useState(false);
   const [minCanceladas, setMinCanceladas] = useState(false);
@@ -108,6 +113,10 @@ export default function Dashboard() {
   const [dreModal, setDreModal] = useState(false);
   const [instModal, setInstModal] = useState(false);
   const [vencModal, setVencModal] = useState<"PS" | "US" | "CA" | null>(null);
+
+  // Filtros por Instalador nos Modais
+  const [filtroInstaladorInst, setFiltroInstaladorInst] = useState("TODOS");
+  const [filtroInstaladorVenc, setFiltroInstaladorVenc] = useState("TODOS");
   
   const [dreStart, setDreStart] = useState("");
   const [dreEnd, setDreEnd] = useState("");
@@ -117,7 +126,7 @@ export default function Dashboard() {
   const [senhaExclusao, setSenhaExclusao] = useState("");
   
   const valorInicialOS = {
-    cliente: "", endereco: "", clienteFinal: "", dataInstalacao: "", instalador: "", obs: "",
+    cliente: "", endereco: "", clienteFinal: "", dataInstalacao: "", instalador: "", vistoriador: "", obs: "",
     modulos: "", inversor: "", notaTecnica: "", receita: "",
     valorCA: "", caCheck: false, caCheck1: false, caCheck2: false, dataCA1: "", dataCA2: "",
     valorPS: "", psCheck1: false, psCheck2: false, dataPS1: "", dataPS2: "",
@@ -376,7 +385,7 @@ export default function Dashboard() {
   const dre = calcularDRE();
 
   // Filtra apenas os grids: Adiada, Aguardando Instalação, Compra CA e Envio de Projetos
-  const getProximasInstalacoes = () => {
+  const getProximasInstalacoesBase = () => {
     const etapasPermitidas = [
       "Adiada",
       "Aguardando Instalação",
@@ -388,10 +397,23 @@ export default function Dashboard() {
       .filter(os => etapasPermitidas.includes(os.etapa) && os.dataInstalacao)
       .sort((a, b) => a.dataInstalacao.localeCompare(b.dataInstalacao));
   };
-  const proximasInstalacoes = getProximasInstalacoes();
+  const proximasInstalacoesBase = getProximasInstalacoesBase();
+
+  const instaladoresDisponiveisInst = Array.from(
+    new Set(
+      proximasInstalacoesBase
+        .map(os => (os.instalador || "").trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  const proximasInstalacoes = proximasInstalacoesBase.filter(os => {
+    if (filtroInstaladorInst === "TODOS") return true;
+    return (os.instalador || "").trim().toLowerCase() === filtroInstaladorInst.toLowerCase();
+  });
 
   // Filtra os vencimentos em aberto (não marcados no checkbox) para PS, US ou CA e divide o valor total por 2
-  const getVencimentosAbertos = (tipo: "PS" | "US" | "CA" | null) => {
+  const getVencimentosAbertosBase = (tipo: "PS" | "US" | "CA" | null) => {
     if (!tipo) return [];
     const osAtivas = listaOS.filter(os => os.etapa !== "Cancelada");
     const itens: any[] = [];
@@ -400,30 +422,30 @@ export default function Dashboard() {
       if (tipo === "PS") {
         const metadePS = formatarMoedaBR(parseMonetario(os.valorPS) / 2);
         if (os.dataPS1 && !os.psCheck1) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadePS, valorTotal: formatarMoedaBR(parseMonetario(os.valorPS)), dataVenc: os.dataPS1, parcela: "1ª Parcela (50%)", campoCheck: "psCheck1", valorCheckAtual: !!os.psCheck1 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, clienteFinal: os.clienteFinal || "-", instalador: os.instalador || "", vistoriador: os.vistoriador || "-", etapa: os.etapa, valorParcela: metadePS, valorTotal: formatarMoedaBR(parseMonetario(os.valorPS)), dataVenc: os.dataPS1, parcela: "1ª Parcela (50%)", campoCheck: "psCheck1", valorCheckAtual: !!os.psCheck1 });
         }
         if (os.dataPS2 && !os.psCheck2) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadePS, valorTotal: formatarMoedaBR(parseMonetario(os.valorPS)), dataVenc: os.dataPS2, parcela: "2ª Parcela (50%)", campoCheck: "psCheck2", valorCheckAtual: !!os.psCheck2 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, clienteFinal: os.clienteFinal || "-", instalador: os.instalador || "", vistoriador: os.vistoriador || "-", etapa: os.etapa, valorParcela: metadePS, valorTotal: formatarMoedaBR(parseMonetario(os.valorPS)), dataVenc: os.dataPS2, parcela: "2ª Parcela (50%)", campoCheck: "psCheck2", valorCheckAtual: !!os.psCheck2 });
         }
       } else if (tipo === "US") {
         const metadeUS = formatarMoedaBR(parseMonetario(os.valorUS) / 2);
         const checkUS1 = os.usCheck1 ?? os.usCheck ?? false;
         const checkUS2 = os.usCheck2 ?? os.usCheck ?? false;
         if (os.dataUS1 && !checkUS1) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeUS, valorTotal: formatarMoedaBR(parseMonetario(os.valorUS)), dataVenc: os.dataUS1, parcela: "1ª Parcela (50%)", campoCheck: "usCheck1", valorCheckAtual: !!checkUS1 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, clienteFinal: os.clienteFinal || "-", instalador: os.instalador || "", vistoriador: os.vistoriador || "-", etapa: os.etapa, valorParcela: metadeUS, valorTotal: formatarMoedaBR(parseMonetario(os.valorUS)), dataVenc: os.dataUS1, parcela: "1ª Parcela (50%)", campoCheck: "usCheck1", valorCheckAtual: !!checkUS1 });
         }
         if (os.dataUS2 && !checkUS2) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeUS, valorTotal: formatarMoedaBR(parseMonetario(os.valorUS)), dataVenc: os.dataUS2, parcela: "2ª Parcela (50%)", campoCheck: "usCheck2", valorCheckAtual: !!checkUS2 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, clienteFinal: os.clienteFinal || "-", instalador: os.instalador || "", vistoriador: os.vistoriador || "-", etapa: os.etapa, valorParcela: metadeUS, valorTotal: formatarMoedaBR(parseMonetario(os.valorUS)), dataVenc: os.dataUS2, parcela: "2ª Parcela (50%)", campoCheck: "usCheck2", valorCheckAtual: !!checkUS2 });
         }
       } else if (tipo === "CA") {
         const metadeCA = formatarMoedaBR(parseMonetario(os.valorCA) / 2);
         const checkCA1 = os.caCheck1 ?? os.caCheck ?? false;
         const checkCA2 = os.caCheck2 ?? os.caCheck ?? false;
         if (os.dataCA1 && !checkCA1) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeCA, valorTotal: formatarMoedaBR(parseMonetario(os.valorCA)), dataVenc: os.dataCA1, parcela: "1ª Parcela (50%)", campoCheck: "caCheck1", valorCheckAtual: !!checkCA1 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, clienteFinal: os.clienteFinal || "-", instalador: os.instalador || "", vistoriador: os.vistoriador || "-", etapa: os.etapa, valorParcela: metadeCA, valorTotal: formatarMoedaBR(parseMonetario(os.valorCA)), dataVenc: os.dataCA1, parcela: "1ª Parcela (50%)", campoCheck: "caCheck1", valorCheckAtual: !!checkCA1 });
         }
         if (os.dataCA2 && !checkCA2) {
-          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, etapa: os.etapa, valorParcela: metadeCA, valorTotal: formatarMoedaBR(parseMonetario(os.valorCA)), dataVenc: os.dataCA2, parcela: "2ª Parcela (50%)", campoCheck: "caCheck2", valorCheckAtual: !!checkCA2 });
+          itens.push({ id: os.id, numeroOS: os.numeroOS, cliente: os.cliente, clienteFinal: os.clienteFinal || "-", instalador: os.instalador || "", vistoriador: os.vistoriador || "-", etapa: os.etapa, valorParcela: metadeCA, valorTotal: formatarMoedaBR(parseMonetario(os.valorCA)), dataVenc: os.dataCA2, parcela: "2ª Parcela (50%)", campoCheck: "caCheck2", valorCheckAtual: !!checkCA2 });
         }
       }
     });
@@ -431,7 +453,57 @@ export default function Dashboard() {
     return itens.sort((a, b) => chaveOrdenacaoDiaMes(a.dataVenc).localeCompare(chaveOrdenacaoDiaMes(b.dataVenc)));
   };
 
-  const vencimentosAbertos = getVencimentosAbertos(vencModal);
+  const vencimentosAbertosBase = getVencimentosAbertosBase(vencModal);
+
+  const instaladoresDisponiveisVenc = Array.from(
+    new Set(
+      vencimentosAbertosBase
+        .map(item => (item.instalador || "").trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  const vencimentosAbertos = vencimentosAbertosBase.filter(item => {
+    if (filtroInstaladorVenc === "TODOS") return true;
+    return (item.instalador || "").trim().toLowerCase() === filtroInstaladorVenc.toLowerCase();
+  });
+
+  // Pesquisa Global nas OSs
+  const resultadosBusca = (() => {
+    const q = termoBusca.trim().toLowerCase();
+    if (!q) return [];
+    return listaOS
+      .filter(os => {
+        const campos = [
+          os.numeroOS ? `os ${os.numeroOS}` : "",
+          os.numeroOS?.toString() || "",
+          os.cliente || "",
+          os.clienteFinal || "",
+          os.endereco || "",
+          os.instalador || "",
+          os.vistoriador || "",
+          os.obs || "",
+          os.modulos || "",
+          os.inversor || "",
+          os.notaTecnica || "",
+          os.etapa || "",
+          os.valorCA || "",
+          os.valorPS || "",
+          os.valorUS || "",
+          os.valorDMS || "",
+          os.receita || "",
+          os.dataCA1 || "",
+          os.dataCA2 || "",
+          os.dataPS1 || "",
+          os.dataPS2 || "",
+          os.dataUS1 || "",
+          os.dataUS2 || "",
+          os.dataInstalacao ? new Date(os.dataInstalacao + "T12:00:00").toLocaleDateString("pt-BR") : ""
+        ];
+        return campos.some(c => c.toLowerCase().includes(q));
+      })
+      .sort((a, b) => (b.numeroOS || 0) - (a.numeroOS || 0));
+  })();
 
   const OsCard = ({ os }: { os: any }) => {
     const [expandido, setExpandido] = useState(false);
@@ -466,6 +538,7 @@ export default function Dashboard() {
 
         {expandido && (
           <div className="mt-2 pt-2 border-t border-gray-100 text-gray-700 space-y-[2px] bg-gray-50 p-1 rounded">
+            {os.vistoriador && <p><span className="font-semibold">Vistoriador:</span> {os.vistoriador}</p>}
             <p><span className="font-semibold">Módulos:</span> {os.modulos}</p>
             <p><span className="font-semibold">Inversor:</span> {os.inversor}</p>
             <p><span className="font-semibold">Nota Técnica:</span> {os.notaTecnica}</p>
@@ -594,19 +667,19 @@ export default function Dashboard() {
         <h1 className="text-lg font-bold text-gray-800">Controle de Operações</h1>
         <div className="flex flex-wrap gap-2 items-center">
           
-          <button onClick={() => setInstModal(true)} className="bg-indigo-100 text-indigo-800 border border-indigo-300 px-2.5 py-1.5 rounded text-xs hover:bg-indigo-200 font-bold flex items-center gap-1 shadow-sm transition">
+          <button onClick={() => { setFiltroInstaladorInst("TODOS"); setInstModal(true); }} className="bg-indigo-100 text-indigo-800 border border-indigo-300 px-2.5 py-1.5 rounded text-xs hover:bg-indigo-200 font-bold flex items-center gap-1 shadow-sm transition">
             📅 Prox. Instalações
           </button>
 
-          <button onClick={() => setVencModal("PS")} className="bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded text-xs hover:bg-amber-200 font-bold flex items-center gap-1 shadow-sm transition">
+          <button onClick={() => { setFiltroInstaladorVenc("TODOS"); setVencModal("PS"); }} className="bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded text-xs hover:bg-amber-200 font-bold flex items-center gap-1 shadow-sm transition">
             ⏳ Venc. PS
           </button>
 
-          <button onClick={() => setVencModal("US")} className="bg-sky-100 text-sky-900 border border-sky-300 px-2.5 py-1.5 rounded text-xs hover:bg-sky-200 font-bold flex items-center gap-1 shadow-sm transition">
+          <button onClick={() => { setFiltroInstaladorVenc("TODOS"); setVencModal("US"); }} className="bg-sky-100 text-sky-900 border border-sky-300 px-2.5 py-1.5 rounded text-xs hover:bg-sky-200 font-bold flex items-center gap-1 shadow-sm transition">
             ⏳ Venc. US
           </button>
 
-          <button onClick={() => setVencModal("CA")} className="bg-orange-100 text-orange-900 border border-orange-300 px-2.5 py-1.5 rounded text-xs hover:bg-orange-200 font-bold flex items-center gap-1 shadow-sm transition">
+          <button onClick={() => { setFiltroInstaladorVenc("TODOS"); setVencModal("CA"); }} className="bg-orange-100 text-orange-900 border border-orange-300 px-2.5 py-1.5 rounded text-xs hover:bg-orange-200 font-bold flex items-center gap-1 shadow-sm transition">
             ⏳ Venc. CA
           </button>
           
@@ -616,6 +689,16 @@ export default function Dashboard() {
           
           <button onClick={() => { setNovaOS(valorInicialOS); setEditandoId(null); setModalAberto(true); }} className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs hover:bg-blue-700 font-bold shadow-sm transition">
             + Nova OS
+          </button>
+
+          {/* BOTÃO DE PESQUISA GLOBAL (LUPA) AO LADO DO SINO */}
+          <button
+            type="button"
+            onClick={() => { setTermoBusca(""); setBuscaModalAberto(true); }}
+            title="Pesquisar OS ou informações cadastradas"
+            className="p-1.5 bg-gray-100 rounded-full hover:bg-blue-100 text-gray-700 transition flex items-center justify-center border border-gray-200"
+          >
+            <IconeLupa />
           </button>
           
           <div className="relative">
@@ -730,15 +813,153 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* MODAL: PESQUISA GLOBAL DE OS (LUPA) */}
+      {buscaModalAberto && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-60 flex items-start justify-center p-4 pt-14 z-[75] text-xs"
+          onClick={() => setBuscaModalAberto(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-2xl w-full max-w-4xl p-5 max-h-[82vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-2 mb-3 shrink-0">
+              <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
+                <IconeLupa /> Pesquisar Ordens de Serviço
+              </h2>
+              <button onClick={() => setBuscaModalAberto(false)} className="text-red-500 font-bold text-xl hover:scale-110">&times;</button>
+            </div>
+
+            <div className="mb-3 shrink-0 flex gap-2">
+              <input
+                type="text"
+                autoFocus
+                placeholder="Digite nº da OS, cliente, cliente final, endereço, instalador, vistoriador, inversor, módulos ou observações..."
+                className="w-full border border-blue-300 focus:border-blue-600 focus:outline-none p-2.5 rounded text-sm text-black bg-blue-50/30"
+                value={termoBusca}
+                onChange={(e) => setTermoBusca(e.target.value)}
+              />
+              {termoBusca && (
+                <button
+                  type="button"
+                  onClick={() => setTermoBusca("")}
+                  className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border font-bold"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1">
+              {!termoBusca.trim() ? (
+                <div className="text-center text-gray-400 italic py-12 border-2 border-dashed rounded bg-gray-50">
+                  Digite qualquer palavra, número ou nome acima para localizar OSs no Kanban, Finalizadas ou Canceladas.
+                </div>
+              ) : resultadosBusca.length === 0 ? (
+                <div className="text-center text-gray-500 italic py-12 border rounded bg-gray-50">
+                  Nenhuma OS encontrada para &ldquo;{termoBusca}&rdquo;.
+                </div>
+              ) : (
+                <>
+                  <p className="text-[11px] font-bold text-gray-600 mb-1">
+                    {resultadosBusca.length} {resultadosBusca.length === 1 ? "OS encontrada" : "OSs encontradas"}:
+                  </p>
+                  {resultadosBusca.map((os) => (
+                    <div key={os.id} className="border border-gray-200 rounded p-3 bg-gray-50/70 hover:bg-white hover:shadow-sm transition flex flex-col md:flex-row justify-between gap-3">
+                      <div className="space-y-1 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-sm text-blue-900">
+                            {os.numeroOS ? `OS ${os.numeroOS} - ` : ""}{os.cliente}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            os.etapa === "Finalizada"
+                              ? "bg-green-100 text-green-800 border-green-300"
+                              : os.etapa === "Cancelada"
+                              ? "bg-red-100 text-red-800 border-red-300"
+                              : "bg-blue-100 text-blue-800 border-blue-200"
+                          }`}>
+                            {os.etapa}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-gray-700">
+                          <p className="truncate"><span className="font-semibold">Cliente Final:</span> {os.clienteFinal || "-"}</p>
+                          <p className="truncate"><span className="font-semibold">Endereço:</span> {os.endereco || "-"}</p>
+                          <p><span className="font-semibold">Instalador:</span> {os.instalador || "-"}</p>
+                          <p><span className="font-semibold">Vistoriador:</span> {os.vistoriador || "-"}</p>
+                          <p><span className="font-semibold">Data Inst.:</span> {os.dataInstalacao ? new Date(os.dataInstalacao + "T12:00:00").toLocaleDateString("pt-BR") : "-"}</p>
+                          <p><span className="font-semibold">Equip.:</span> {[os.modulos, os.inversor].filter(Boolean).join(" | ") || "-"}</p>
+                        </div>
+                        {os.obs && (
+                          <p className="text-[11px] text-gray-600 bg-white p-1.5 rounded border border-gray-100">
+                            <span className="font-semibold">Obs:</span> {os.obs}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex md:flex-col justify-end gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => { setBuscaModalAberto(false); abrirEdicaoOS(os); }}
+                          className="px-2.5 py-1 bg-orange-50 text-orange-800 border border-orange-200 rounded font-bold hover:bg-orange-100 flex items-center gap-1"
+                        >
+                          <IconeLapis /> Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setBuscaModalAberto(false); setOsHistorico(os); }}
+                          className="px-2.5 py-1 bg-gray-100 text-gray-700 border border-gray-200 rounded font-bold hover:bg-gray-200 flex items-center gap-1"
+                        >
+                          <IconeLivro /> Histórico
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setBuscaModalAberto(false); setOsDashboard(os); }}
+                          className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded font-bold hover:bg-blue-100 flex items-center gap-1"
+                        >
+                          <IconeGrafico /> Financeiro
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setBuscaModalAberto(false); setOsAnexos(os); }}
+                          className="px-2.5 py-1 bg-gray-100 text-gray-800 border border-gray-200 rounded font-bold hover:bg-gray-200 flex items-center gap-1"
+                        >
+                          <IconeClipe /> Anexos
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: VENCIMENTOS EM ABERTO (PS, US, CA) COM VALOR DIVIDIDO POR 2 */}
       {vencModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[70] text-sm">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl p-5 h-[80vh] flex flex-col">
-            <div className="flex justify-between border-b pb-2 mb-4 shrink-0">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-5 h-[80vh] flex flex-col">
+            <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2 mb-4 shrink-0">
               <h2 className="font-bold text-amber-900 text-lg">
                 ⏳ Vencimentos em Aberto — Valor {vencModal} ({vencimentosAbertos.length})
               </h2>
-              <button onClick={() => setVencModal(null)} className="text-red-500 font-bold text-xl hover:scale-110">&times;</button>
+
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded text-xs">
+                  <label className="font-bold text-amber-900">Filtrar Instalador:</label>
+                  <select
+                    value={filtroInstaladorVenc}
+                    onChange={(e) => setFiltroInstaladorVenc(e.target.value)}
+                    className="border border-amber-300 rounded px-2 py-0.5 bg-white text-black font-semibold"
+                  >
+                    <option value="TODOS">Todos ({vencimentosAbertosBase.length})</option>
+                    {instaladoresDisponiveisVenc.map((inst) => (
+                      <option key={inst} value={inst}>{inst}</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={() => setVencModal(null)} className="text-red-500 font-bold text-xl hover:scale-110 ml-2">&times;</button>
+              </div>
             </div>
 
             <div className="overflow-x-auto flex-1 border border-amber-300 rounded shadow-sm">
@@ -748,7 +969,10 @@ export default function Dashboard() {
                     <th className="p-2 border-b">Vencimento (DD/MM)</th>
                     <th className="p-2 border-b">Referência</th>
                     <th className="p-2 border-b">OS / Cliente</th>
-                    <th className="p-2 border-b">Valor da Parcela (50%)</th>
+                    <th className="p-2 border-b">Cliente Final</th>
+                    {vencModal === "PS" && <th className="p-2 border-b">Vistoriador</th>}
+                    <th className="p-2 border-b">Instalador</th>
+                    <th className="p-2 border-b">Valor Parcela (50%)</th>
                     <th className="p-2 border-b text-gray-500">Total Lançado</th>
                     <th className="p-2 border-b">Etapa Atual</th>
                     <th className="p-2 border-b text-center">Dar Baixa (Pago)</th>
@@ -762,14 +986,25 @@ export default function Dashboard() {
                           {item.dataVenc}
                         </span>
                       </td>
-                      <td className="p-2 text-gray-600 font-semibold">{item.parcela}</td>
-                      <td className="p-2 font-bold text-blue-900 truncate max-w-[200px]" title={item.cliente}>
+                      <td className="p-2 text-gray-600 font-semibold whitespace-nowrap">{item.parcela}</td>
+                      <td className="p-2 font-bold text-blue-900 truncate max-w-[180px]" title={item.cliente}>
                         OS {item.numeroOS || "-"} - {item.cliente}
                       </td>
-                      <td className="p-2 font-bold text-red-700">R$ {item.valorParcela}</td>
-                      <td className="p-2 text-gray-500">R$ {item.valorTotal}</td>
+                      <td className="p-2 text-gray-700 truncate max-w-[150px]" title={item.clienteFinal}>
+                        {item.clienteFinal}
+                      </td>
+                      {vencModal === "PS" && (
+                        <td className="p-2 font-semibold text-gray-800 whitespace-nowrap">
+                          {item.vistoriador}
+                        </td>
+                      )}
+                      <td className="p-2 text-gray-700 whitespace-nowrap">
+                        {item.instalador || "-"}
+                      </td>
+                      <td className="p-2 font-bold text-red-700 whitespace-nowrap">R$ {item.valorParcela}</td>
+                      <td className="p-2 text-gray-500 whitespace-nowrap">R$ {item.valorTotal}</td>
                       <td className="p-2">
-                        <span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600">
+                        <span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600 whitespace-nowrap">
                           {item.etapa}
                         </span>
                       </td>
@@ -777,7 +1012,7 @@ export default function Dashboard() {
                         <button
                           type="button"
                           onClick={() => toggleCheckboxCard(item.id, item.campoCheck, item.valorCheckAtual)}
-                          className="bg-green-100 text-green-800 border border-green-300 px-2 py-1 rounded text-[10px] font-bold hover:bg-green-600 hover:text-white transition"
+                          className="bg-green-100 text-green-800 border border-green-300 px-2 py-1 rounded text-[10px] font-bold hover:bg-green-600 hover:text-white transition whitespace-nowrap"
                         >
                           ✓ Marcar Pago
                         </button>
@@ -786,8 +1021,8 @@ export default function Dashboard() {
                   ))}
                   {vencimentosAbertos.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-500 italic">
-                        Nenhum vencimento de {vencModal} em aberto no momento! Tudo pago ou sem data preenchida.
+                      <td colSpan={vencModal === "PS" ? 10 : 9} className="p-8 text-center text-gray-500 italic">
+                        Nenhum vencimento de {vencModal} em aberto para o filtro selecionado!
                       </td>
                     </tr>
                   )}
@@ -802,11 +1037,27 @@ export default function Dashboard() {
       {instModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[70] text-sm">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-5 h-[80vh] flex flex-col">
-            <div className="flex justify-between border-b pb-2 mb-4 shrink-0">
+            <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2 mb-4 shrink-0">
               <h2 className="font-bold text-indigo-800 text-lg">
                 📅 Próximas Instalações ({proximasInstalacoes.length})
               </h2>
-              <button onClick={() => setInstModal(false)} className="text-red-500 font-bold text-xl hover:scale-110">&times;</button>
+
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded text-xs">
+                  <label className="font-bold text-indigo-900">Filtrar Instalador:</label>
+                  <select
+                    value={filtroInstaladorInst}
+                    onChange={(e) => setFiltroInstaladorInst(e.target.value)}
+                    className="border border-indigo-300 rounded px-2 py-0.5 bg-white text-black font-semibold"
+                  >
+                    <option value="TODOS">Todos ({proximasInstalacoesBase.length})</option>
+                    {instaladoresDisponiveisInst.map((inst) => (
+                      <option key={inst} value={inst}>{inst}</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={() => setInstModal(false)} className="text-red-500 font-bold text-xl hover:scale-110 ml-2">&times;</button>
+              </div>
             </div>
 
             <div className="overflow-x-auto flex-1 border border-indigo-300 rounded shadow-sm">
@@ -815,6 +1066,7 @@ export default function Dashboard() {
                   <tr>
                     <th className="p-2 border-b">Data Instalação</th>
                     <th className="p-2 border-b">OS / Cliente</th>
+                    <th className="p-2 border-b">Cliente Final</th>
                     <th className="p-2 border-b">Endereço</th>
                     <th className="p-2 border-b">Instalador</th>
                     <th className="p-2 border-b">Etapa Atual</th>
@@ -829,19 +1081,22 @@ export default function Dashboard() {
                           {new Date(os.dataInstalacao + "T12:00:00").toLocaleDateString('pt-BR')}
                           {atrasada && <span className="ml-1 text-[9px] bg-red-100 text-red-800 px-1 py-0.5 rounded">Atrasada</span>}
                         </td>
-                        <td className="p-2 font-bold text-gray-700 truncate max-w-[200px]" title={os.cliente}>
+                        <td className="p-2 font-bold text-gray-700 truncate max-w-[190px]" title={os.cliente}>
                           OS {os.numeroOS || "-"} - {os.cliente}
                         </td>
-                        <td className="p-2 truncate max-w-[250px]" title={os.endereco}>{os.endereco}</td>
-                        <td className="p-2">{os.instalador || "-"}</td>
-                        <td className="p-2"><span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600">{os.etapa}</span></td>
+                        <td className="p-2 text-gray-700 truncate max-w-[160px]" title={os.clienteFinal}>
+                          {os.clienteFinal || "-"}
+                        </td>
+                        <td className="p-2 truncate max-w-[230px]" title={os.endereco}>{os.endereco}</td>
+                        <td className="p-2 font-semibold">{os.instalador || "-"}</td>
+                        <td className="p-2"><span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600 whitespace-nowrap">{os.etapa}</span></td>
                       </tr>
                     );
                   })}
                   {proximasInstalacoes.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center text-gray-500 italic">
-                        Nenhuma instalação com data agendada nas etapas selecionadas.
+                      <td colSpan={6} className="p-8 text-center text-gray-500 italic">
+                        Nenhuma instalação encontrada para o filtro selecionado.
                       </td>
                     </tr>
                   )}
@@ -884,9 +1139,10 @@ export default function Dashboard() {
                 <input placeholder="Cliente Final" className="border p-1.5 rounded text-black" value={novaOS.clienteFinal} onChange={e => setNovaOS({...novaOS, clienteFinal: e.target.value})} />
                 <input type="date" title="Data de Instalação" className="border p-1.5 rounded text-black" value={novaOS.dataInstalacao} onChange={e => setNovaOS({...novaOS, dataInstalacao: e.target.value})} />
                 <input placeholder="Instalador" className="border p-1.5 rounded text-black" value={novaOS.instalador} onChange={e => setNovaOS({...novaOS, instalador: e.target.value})} />
+                <input placeholder="Vistoriador" className="border p-1.5 rounded text-black" value={novaOS.vistoriador || ""} onChange={e => setNovaOS({...novaOS, vistoriador: e.target.value})} />
                 <input placeholder="Módulos" className="border p-1.5 rounded text-black" value={novaOS.modulos} onChange={e => setNovaOS({...novaOS, modulos: e.target.value})} />
                 <input placeholder="Inversor" className="border p-1.5 rounded text-black" value={novaOS.inversor} onChange={e => setNovaOS({...novaOS, inversor: e.target.value})} />
-                <input placeholder="Nota Técnica" className="border p-1.5 rounded text-black" value={novaOS.notaTecnica} onChange={e => setNovaOS({...novaOS, notaTecnica: e.target.value})} />
+                <input placeholder="Nota Técnica" className="border p-1.5 rounded md:col-span-2 text-black" value={novaOS.notaTecnica} onChange={e => setNovaOS({...novaOS, notaTecnica: e.target.value})} />
                 <textarea placeholder="Observações" className="border p-1.5 rounded md:col-span-2 text-black" rows={2} value={novaOS.obs} onChange={e => setNovaOS({...novaOS, obs: e.target.value})} />
                 
                 <div className="md:col-span-2 mt-2 font-bold text-blue-800 border-b pb-1">Financeiro (Formatado em R$) e Vencimentos (DD/MM)</div>
