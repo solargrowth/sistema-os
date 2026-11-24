@@ -6,17 +6,17 @@ import { db } from "../../../lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
 
 const ETAPAS_FLUXO = [
-  { nome: "Inserir Documentos", descricao: "Coleta e conferência da documentação necessária." },
-  { nome: "Vist. Agendada", descricao: "Vistoria técnica agendada no local da instalação." },
-  { nome: "Layout", descricao: "Elaboração do layout e posicionamento dos módulos." },
-  { nome: "Orçamentos", descricao: "Levantamento e aprovação dos materiais do projeto." },
-  { nome: "Lista CA", descricao: "Definição dos materiais elétricos de corrente alternada." },
-  { nome: "Projeto", descricao: "Desenvolvimento do projeto executivo de engenharia." },
-  { nome: "Homologação", descricao: "Solicitação e análise de parecer junto à concessionária." },
-  { nome: "Compra CA", descricao: "Aquisição dos componentes elétricos de proteção e conexão." },
-  { nome: "Aguardando Instalação", descricao: "Equipe e materiais programados para a montagem." },
-  { nome: "Vist. Concessionária.", descricao: "Aguardando inspeção final da concessionária de energia." },
-  { nome: "Troca Relogio", descricao: "Substituição do medidor para ativação do sistema solar." },
+  { nome: "Inserir Documentos", descricao: "Coleta e conferência da documentação necessária. 1 DIA" },
+  { nome: "Vist. Agendada", descricao: "Vistoria técnica agendada no local da instalação. 3 DIAS" },
+  { nome: "Layout", descricao: "Elaboração do layout e posicionamento dos módulos.2 DIAS" },
+  { nome: "Orçamentos", descricao: "Levantamento e aprovação dos materiais do projeto. 2 DIAS" },
+  { nome: "Lista CA", descricao: "Definição dos materiais elétricos de corrente alternada. 3 DIAS" },
+  { nome: "Projeto", descricao: "Desenvolvimento do projeto executivo de engenharia. 10 DIAS" },
+  { nome: "Homologação", descricao: "Solicitação e análise de parecer junto à concessionária. 2 DIAS" },
+  { nome: "Compra CA", descricao: "Aquisição dos componentes elétricos de proteção e conexão. 7 DIAS" },
+  { nome: "Aguardando Instalação", descricao: "Equipe e materiais programados para a montagem. 7 DIAS" },
+  { nome: "Vist. Concessionária.", descricao: "Aguardando inspeção final da concessionária de energia. 2 DIAS" },
+  { nome: "Troca Relogio", descricao: "Substituição do medidor para ativação do sistema solar. 7 DIAS" },
   { nome: "Finalizada", descricao: "Sistema concluído, homologado e em operação!" }
 ];
 
