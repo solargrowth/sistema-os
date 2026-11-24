@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { db } from "../../../lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -36,7 +36,18 @@ interface DadosRastreio {
   atualizadoEm?: string;
 }
 
-export default function AcompanharOSPage() {
+function TelaCarregamento() {
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans">
+      <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+      <p className="text-sm text-slate-600 font-medium">
+        Carregando andamento da sua Ordem de Serviço...
+      </p>
+    </div>
+  );
+}
+
+function AcompanharOSConteudo() {
   const params = useParams();
   const token =
     typeof params?.token === "string"
@@ -80,14 +91,7 @@ export default function AcompanharOSPage() {
   }, [token]);
 
   if (carregando) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
-        <p className="text-sm text-slate-600 font-medium">
-          Carregando andamento da sua Ordem de Serviço...
-        </p>
-      </div>
-    );
+    return <TelaCarregamento />;
   }
 
   if (naoEncontrado || !dados) {
@@ -288,5 +292,13 @@ export default function AcompanharOSPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function AcompanharOSPage() {
+  return (
+    <Suspense fallback={<TelaCarregamento />}>
+      <AcompanharOSConteudo />
+    </Suspense>
   );
 }
