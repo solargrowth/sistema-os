@@ -13,12 +13,12 @@ const ETAPAS_FLUXO = [
   },
   {
     nome: "Desenvolvimento de Projeto",
-    diasUteis: 10,
+    diasUteis: 5,
     descricao: "Vistoria técnica, definição de layout, dimensionamento e elaboração do projeto executivo."
   },
   {
     nome: "Homologação",
-    diasUteis: 10,
+    diasUteis: 20,
     descricao: "Submissão e análise de parecer de acesso junto à concessionária de energia."
   },
   {
