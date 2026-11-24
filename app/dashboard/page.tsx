@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { 
   collection, addDoc, onSnapshot, doc, updateDoc, arrayUnion, deleteDoc, setDoc 
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 // Grades atualizadas e reordenadas
 const ETAPAS = [
@@ -125,9 +125,10 @@ export default function Dashboard() {
   const [osAnexos, setOsAnexos] = useState<any | null>(null);
   const [osLinkModal, setOsLinkModal] = useState<{ os: any; url: string; copiado: boolean } | null>(null);
   
-  // Estados para Upload
+  // Estados para Upload e Exclusão de Anexos
   const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);
   const [enviandoAnexo, setEnviandoAnexo] = useState(false);
+  const [excluindoAnexo, setExcluindoAnexo] = useState<string | null>(null);
   
   const [osStatusModal, setOsStatusModal] = useState<{ id: string, acao: string, data: string } | null>(null);
   const [dreModal, setDreModal] = useState(false);
@@ -427,6 +428,42 @@ export default function Dashboard() {
       } finally {
         setEnviandoAnexo(false);
       }
+    }
+  };
+
+  const excluirAnexo = async (arq: any) => {
+    if (!osAnexos) return;
+    if (!window.confirm(`Deseja realmente excluir o arquivo "${arq.nome}"?`)) return;
+
+    const chaveItem = arq.data || arq.nome;
+    setExcluindoAnexo(chaveItem);
+
+    try {
+      const storageRef = ref(storage, `anexos_os/${osAnexos.id}/${arq.nome}`);
+      try {
+        await deleteObject(storageRef);
+      } catch (storageError: any) {
+        if (storageError?.code !== "storage/object-not-found") {
+          throw storageError;
+        }
+      }
+
+      const anexosAtualizados = (osAnexos.anexos || []).filter(
+        (item: any) => !(item.nome === arq.nome && item.data === arq.data)
+      );
+
+      const osRef = doc(db, "ordens_servico", osAnexos.id);
+      await updateDoc(osRef, {
+        anexos: anexosAtualizados,
+        historico: arrayUnion(registrarAuditoria(`Excluiu arquivo: ${arq.nome}`))
+      });
+
+      setOsAnexos({ ...osAnexos, anexos: anexosAtualizados });
+    } catch (error) {
+      console.error("Erro ao excluir anexo:", error);
+      alert("Não foi possível excluir o arquivo. Tente novamente.");
+    } finally {
+      setExcluindoAnexo(null);
     }
   };
 
@@ -1603,20 +1640,34 @@ export default function Dashboard() {
             <h3 className="font-bold text-xs text-gray-600 border-b pb-1 mb-2">Arquivos Salvos:</h3>
             <div className="max-h-40 overflow-y-auto space-y-2 text-[10px] pr-1">
               {osAnexos.anexos && osAnexos.anexos.length > 0 ? (
-                osAnexos.anexos.map((arq: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center bg-white p-2 rounded border shadow-sm">
-                    <a 
-                      href={arq.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="font-bold text-blue-600 truncate mr-2 hover:underline flex-1" 
-                      title={arq.nome}
-                    >
-                      📄 {arq.nome}
-                    </a>
-                    <span className="text-gray-400 whitespace-nowrap text-[9px]">{new Date(arq.data).toLocaleDateString('pt-BR')}</span>
-                  </div>
-                ))
+                osAnexos.anexos.map((arq: any, i: number) => {
+                  const chaveItem = arq.data || arq.nome;
+                  return (
+                    <div key={i} className="flex justify-between items-center gap-1.5 bg-white p-2 rounded border shadow-sm">
+                      <a 
+                        href={arq.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="font-bold text-blue-600 truncate hover:underline flex-1 min-w-0" 
+                        title={arq.nome}
+                      >
+                        📄 {arq.nome}
+                      </a>
+                      <span className="text-gray-400 whitespace-nowrap text-[9px] shrink-0">
+                        {new Date(arq.data).toLocaleDateString('pt-BR')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => excluirAnexo(arq)}
+                        disabled={excluindoAnexo === chaveItem}
+                        title="Excluir arquivo"
+                        className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-1.5 py-0.5 rounded font-bold text-[9px] transition disabled:opacity-50 shrink-0"
+                      >
+                        {excluindoAnexo === chaveItem ? "..." : "🗑️"}
+                      </button>
+                    </div>
+                  );
+                })
               ) : (
                 <p className="text-gray-500 italic text-center mt-4">Nenhum arquivo enviado.</p>
               )}
