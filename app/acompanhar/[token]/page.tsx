@@ -6,26 +6,100 @@ import { db } from "../../../lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
 
 const ETAPAS_FLUXO = [
-  { nome: "Inserir Documentos", descricao: "Coleta e conferência da documentação necessária. 1 DIA" },
-  { nome: "Vist. Agendada", descricao: "Vistoria técnica agendada no local da instalação. 3 DIAS" },
-  { nome: "Layout", descricao: "Elaboração do layout e posicionamento dos módulos.2 DIAS" },
-  { nome: "Orçamentos", descricao: "Levantamento e aprovação dos materiais do projeto. 2 DIAS" },
-  { nome: "Lista CA", descricao: "Definição dos materiais elétricos de corrente alternada. 3 DIAS" },
-  { nome: "Projeto", descricao: "Desenvolvimento do projeto executivo de engenharia. 10 DIAS" },
-  { nome: "Homologação", descricao: "Solicitação e análise de parecer junto à concessionária. 2 DIAS" },
-  { nome: "Compra CA", descricao: "Aquisição dos componentes elétricos de proteção e conexão. 7 DIAS" },
-  { nome: "Aguardando Instalação", descricao: "Equipe e materiais programados para a montagem. 7 DIAS" },
-  { nome: "Vist. Concessionária.", descricao: "Aguardando inspeção final da concessionária de energia. 2 DIAS" },
-  { nome: "Troca Relogio", descricao: "Substituição do medidor para ativação do sistema solar. 7 DIAS" },
-  { nome: "Finalizada", descricao: "Sistema concluído, homologado e em operação!" }
+  {
+    nome: "Contrato",
+    diasUteis: 1,
+    descricao: "Formalização do contrato, conferência documental e agendamento da vistoria técnica."
+  },
+  {
+    nome: "Desenvolvimento de Projeto",
+    diasUteis: 10,
+    descricao: "Vistoria técnica, definição de layout, dimensionamento e elaboração do projeto executivo."
+  },
+  {
+    nome: "Homologação",
+    diasUteis: 10,
+    descricao: "Submissão e análise de parecer de acesso junto à concessionária de energia."
+  },
+  {
+    nome: "Entrega de Equipamentos",
+    diasUteis: 7,
+    descricao: "Aquisição, faturamento e logística de entrega dos equipamentos no local da instalação."
+  },
+  {
+    nome: "Instalação",
+    diasUteis: 7,
+    descricao: "Montagem dos módulos fotovoltaicos, inversor e adequações elétricas pela equipe técnica."
+  },
+  {
+    nome: "Troca de Relógio",
+    diasUteis: 12,
+    descricao: "Vistoria final da concessionária e substituição do medidor para ativação do sistema."
+  },
+  {
+    nome: "Finalização",
+    diasUteis: 0,
+    descricao: "Projeto concluído, homologado e em operação!"
+  }
 ];
 
-// Oculta etapas internas e mantém a linha do tempo contínua para o cliente
+// Mapeia as colunas internas do Kanban para os 7 status resumidos do cliente
 const mapearEtapaPublica = (etapaInterna: string) => {
-  if (etapaInterna === "Pré Contrato Vist.") return "Inserir Documentos";
-  if (etapaInterna === "Compra USINA") return "Homologação";
-  if (etapaInterna === "Envio de Projetos") return "Compra CA";
-  return etapaInterna;
+  switch (etapaInterna) {
+    case "Pré Contrato Vist.":
+    case "Inserir Documentos":
+      return "Contrato";
+    case "Vist. Agendada":
+    case "Layout":
+    case "Orçamentos":
+    case "Lista CA":
+    case "Projeto":
+      return "Desenvolvimento de Projeto";
+    case "Homologação":
+    case "Compra USINA":
+      return "Homologação";
+    case "Compra CA":
+    case "Envio de Projetos":
+      return "Entrega de Equipamentos";
+    case "Aguardando Instalação":
+      return "Instalação";
+    case "Vist. Concessionária.":
+    case "Troca Relogio":
+      return "Troca de Relógio";
+    case "Finalizada":
+      return "Finalização";
+    default:
+      return etapaInterna;
+  }
+};
+
+// Soma dias úteis (ignorando sábados e domingos) a partir de uma data base
+const adicionarDiasUteis = (dataBase: Date, diasUteis: number): Date => {
+  const resultado = new Date(dataBase.getTime());
+  let adicionados = 0;
+
+  while (adicionados < diasUteis) {
+    resultado.setDate(resultado.getDate() + 1);
+    const diaSemana = resultado.getDay();
+    if (diaSemana !== 0 && diaSemana !== 6) {
+      adicionados++;
+    }
+  }
+
+  return resultado;
+};
+
+const normalizarDataLocal = (isoOuData?: string): Date => {
+  if (!isoOuData) return new Date();
+  if (isoOuData.length === 10 && isoOuData.includes("-")) {
+    return new Date(`${isoOuData}T12:00:00`);
+  }
+  const d = new Date(isoOuData);
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
+const formatarDataBR = (data: Date): string => {
+  return data.toLocaleDateString("pt-BR");
 };
 
 interface DadosRastreio {
@@ -33,6 +107,8 @@ interface DadosRastreio {
   cliente?: string;
   etapa?: string;
   dataInstalacao?: string;
+  dataCriacao?: string;
+  dataFinalizacao?: string;
   atualizadoEm?: string;
 }
 
@@ -112,23 +188,39 @@ function AcompanharOSConteudo() {
     );
   }
 
-  const etapaBruta = dados.etapa || "Inserir Documentos";
+  const etapaBruta = dados.etapa || "Pré Contrato Vist.";
   const etapaAtual = mapearEtapaPublica(etapaBruta);
 
   const isCancelada = etapaAtual === "Cancelada";
   const isAdiada = etapaAtual === "Adiada";
-  const isFinalizada = etapaAtual === "Finalizada";
+  const isFinalizada = etapaAtual === "Finalização";
 
-  const indiceAtual = ETAPAS_FLUXO.findIndex(
+  // Calcula a linha do tempo de datas previstas em dias úteis a partir da criação da OS
+  const dataCriacaoObj = normalizarDataLocal(dados.dataCriacao || dados.atualizadoEm);
+  let cursorData = new Date(dataCriacaoObj.getTime());
+
+  const etapasComPrevisao = ETAPAS_FLUXO.map((etapa) => {
+    if (etapa.diasUteis > 0) {
+      cursorData = adicionarDiasUteis(cursorData, etapa.diasUteis);
+    }
+    return {
+      ...etapa,
+      dataPrevisao: new Date(cursorData.getTime())
+    };
+  });
+
+  const dataPrevisaoFinal = etapasComPrevisao[etapasComPrevisao.length - 1].dataPrevisao;
+
+  const indiceAtual = etapasComPrevisao.findIndex(
     (e) => e.nome.toLowerCase() === etapaAtual.toLowerCase()
   );
 
-  const totalEtapas = ETAPAS_FLUXO.length;
+  const totalEtapas = etapasComPrevisao.length;
   const progressoPercentual = isFinalizada
     ? 100
     : indiceAtual >= 0
     ? Math.round(((indiceAtual + 1) / totalEtapas) * 100)
-    : 8;
+    : 14;
 
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-4 font-sans text-slate-800">
@@ -143,11 +235,14 @@ function AcompanharOSConteudo() {
               {dados.numeroOS ? `OS #${dados.numeroOS} — ` : ""}
               {dados.cliente || "Cliente"}
             </h1>
+            <p className="text-[11px] text-blue-100 mt-1">
+              Início do processo (criação): <strong>{formatarDataBR(dataCriacaoObj)}</strong>
+            </p>
           </div>
 
           <div className="p-5 space-y-4">
-            {/* Status em Destaque */}
-            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
+            {/* Status Atual e Previsão de Término */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
               <div>
                 <span className="text-[11px] text-slate-500 block font-medium">Status Atual</span>
                 <span
@@ -165,17 +260,32 @@ function AcompanharOSConteudo() {
                 </span>
               </div>
 
-              {dados.dataInstalacao && !isCancelada && (
-                <div className="text-right">
+              {!isCancelada && (
+                <div className="sm:text-right">
                   <span className="text-[11px] text-slate-500 block font-medium">
-                    Previsão de Instalação
+                    {isFinalizada && dados.dataFinalizacao
+                      ? "Concluído em"
+                      : "Previsão de Término do Projeto"}
                   </span>
                   <span className="text-xs font-bold text-slate-800 bg-white px-2.5 py-1 rounded border border-slate-200 inline-block mt-0.5">
-                    📅 {new Date(dados.dataInstalacao + "T12:00:00").toLocaleDateString("pt-BR")}
+                    📅{" "}
+                    {isFinalizada && dados.dataFinalizacao
+                      ? formatarDataBR(normalizarDataLocal(dados.dataFinalizacao))
+                      : formatarDataBR(dataPrevisaoFinal)}
                   </span>
                 </div>
               )}
             </div>
+
+            {/* Previsão específica de Instalação quando agendada */}
+            {dados.dataInstalacao && !isCancelada && (
+              <div className="flex items-center justify-between bg-indigo-50/70 border border-indigo-200 px-3.5 py-2 rounded-lg text-xs">
+                <span className="font-semibold text-indigo-900">Data prevista para instalação:</span>
+                <span className="font-bold text-indigo-800">
+                  🛠️ {formatarDataBR(normalizarDataLocal(dados.dataInstalacao))}
+                </span>
+              </div>
+            )}
 
             {/* Avisos Especiais (Adiada ou Cancelada) */}
             {isAdiada && (
@@ -216,17 +326,23 @@ function AcompanharOSConteudo() {
           </div>
         </div>
 
-        {/* Linha do Tempo das Etapas */}
+        {/* Linha do Tempo das 7 Etapas */}
         {!isCancelada && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">
-              Etapas do Projeto
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Etapas do Projeto
+              </h2>
+              <span className="text-[10px] text-slate-400 font-medium">
+                Prazos estimados em dias úteis
+              </span>
+            </div>
 
-            <div className="relative pl-6 space-y-5 before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-              {ETAPAS_FLUXO.map((etapa, index) => {
+            <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+              {etapasComPrevisao.map((etapa, index) => {
                 const concluida = isFinalizada || (indiceAtual >= 0 && index < indiceAtual);
                 const atual = !isFinalizada && indiceAtual === index;
+                const isUltima = etapa.nome === "Finalização";
 
                 return (
                   <div key={etapa.nome} className="relative">
@@ -244,12 +360,12 @@ function AcompanharOSConteudo() {
                     </span>
 
                     <div
-                      className={`rounded-lg p-2.5 border transition-all ${
+                      className={`rounded-lg p-3 border transition-all ${
                         atual
                           ? "bg-blue-50/80 border-blue-300 shadow-sm"
                           : concluida
                           ? "bg-emerald-50/30 border-emerald-100"
-                          : "bg-white border-transparent opacity-65"
+                          : "bg-white border-slate-100 opacity-75"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -259,7 +375,7 @@ function AcompanharOSConteudo() {
                               ? "text-blue-900"
                               : concluida
                               ? "text-emerald-900"
-                              : "text-slate-600"
+                              : "text-slate-700"
                           }`}
                         >
                           {etapa.nome}
@@ -275,9 +391,28 @@ function AcompanharOSConteudo() {
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+
+                      <p className="text-[11px] text-slate-600 mt-1 leading-snug">
                         {etapa.descricao}
                       </p>
+
+                      {/* Previsão de término da etapa */}
+                      <div className="mt-2 pt-1.5 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-1 text-[10px]">
+                        <span className="font-semibold text-slate-600">
+                          {isUltima
+                            ? "Previsão de término total:"
+                            : "Previsão de término da etapa:"}{" "}
+                          <strong className={atual ? "text-blue-800" : "text-slate-800"}>
+                            {formatarDataBR(etapa.dataPrevisao)}
+                          </strong>
+                        </span>
+
+                        {etapa.diasUteis > 0 && (
+                          <span className="text-slate-400 font-medium">
+                            ({etapa.diasUteis} {etapa.diasUteis === 1 ? "dia útil" : "dias úteis"})
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
