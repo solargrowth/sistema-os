@@ -5,7 +5,7 @@ import { auth, db, storage } from "../../lib/firebase";
 import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
-  collection, addDoc, onSnapshot, doc, updateDoc, arrayUnion, deleteDoc 
+  collection, addDoc, onSnapshot, doc, updateDoc, arrayUnion, deleteDoc, setDoc 
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -75,6 +75,24 @@ const chaveOrdenacaoDiaMes = (ddmm: string) => {
   return `${ (m || "99").padStart(2, "0") }-${ (d || "99").padStart(2, "0") }`;
 };
 
+// Gera token aleatório único para o link público do cliente
+const gerarTokenRastreio = () => {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let token = "";
+  const array = new Uint32Array(18);
+  if (typeof window !== "undefined" && window.crypto) {
+    window.crypto.getRandomValues(array);
+    for (let i = 0; i < array.length; i++) {
+      token += chars[array[i] % chars.length];
+    }
+  } else {
+    for (let i = 0; i < 18; i++) {
+      token += chars[Math.floor(Math.random() * chars.length)];
+    }
+  }
+  return token;
+};
+
 const IconeCheck = () => <svg className="w-3.5 h-3.5 text-green-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>;
 const IconeCancel = () => <svg className="w-3.5 h-3.5 text-red-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>;
 const IconeLivro = () => <svg className="w-3.5 h-3.5 text-gray-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>;
@@ -84,6 +102,7 @@ const IconeLapis = () => <svg className="w-3.5 h-3.5 text-orange-600 hover:scale
 const IconeLixeira = () => <svg className="w-3.5 h-3.5 text-red-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>;
 const IconeRepatriar = () => <svg className="w-3.5 h-3.5 text-gray-700 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>;
 const IconeLupa = () => <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>;
+const IconeLink = () => <svg className="w-3.5 h-3.5 text-indigo-600 hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>;
 
 export default function Dashboard() {
   const router = useRouter();
@@ -104,6 +123,7 @@ export default function Dashboard() {
   const [osHistorico, setOsHistorico] = useState<any | null>(null);
   const [osDashboard, setOsDashboard] = useState<any | null>(null);
   const [osAnexos, setOsAnexos] = useState<any | null>(null);
+  const [osLinkModal, setOsLinkModal] = useState<{ os: any; url: string; copiado: boolean } | null>(null);
   
   // Estados para Upload
   const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);
@@ -131,7 +151,7 @@ export default function Dashboard() {
     valorCA: "", caCheck: false, caCheck1: false, caCheck2: false, dataCA1: "", dataCA2: "",
     valorPS: "", psCheck1: false, psCheck2: false, dataPS1: "", dataPS2: "",
     valorUS: "", usCheck: false, usCheck1: false, usCheck2: false, dataUS1: "", dataUS2: "",
-    valorDMS: "", dmsCheck: false, numeroOS: 0
+    valorDMS: "", dmsCheck: false, numeroOS: 0, tokenRastreio: "", etapa: "Pré Contrato Vist."
   };
 
   const [novaOS, setNovaOS] = useState(valorInicialOS);
@@ -151,6 +171,67 @@ export default function Dashboard() {
     });
     return () => unsub();
   }, []);
+
+  // Sincroniza apenas os dados públicos não-sensíveis para o link do cliente
+  const sincronizarRastreioPublico = async (
+    token: string,
+    dados: { numeroOS?: number; cliente?: string; etapa?: string; dataInstalacao?: string }
+  ) => {
+    if (!token) return;
+    try {
+      await setDoc(
+        doc(db, "rastreio_publico", token),
+        {
+          numeroOS: dados.numeroOS || 0,
+          cliente: dados.cliente || "",
+          etapa: dados.etapa || "Pré Contrato Vist.",
+          dataInstalacao: dados.dataInstalacao || "",
+          atualizadoEm: new Date().toISOString()
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error("Erro ao sincronizar rastreio público:", error);
+    }
+  };
+
+  // Garante que a OS possua um token (inclusive OSs antigas) e abre o modal com o link público
+  const abrirLinkCliente = async (os: any) => {
+    try {
+      let token = os.tokenRastreio;
+      if (!token) {
+        token = gerarTokenRastreio();
+        await updateDoc(doc(db, "ordens_servico", os.id), {
+          tokenRastreio: token
+        });
+      }
+
+      await sincronizarRastreioPublico(token, {
+        numeroOS: os.numeroOS,
+        cliente: os.cliente,
+        etapa: os.etapa,
+        dataInstalacao: os.dataInstalacao
+      });
+
+      const origem = typeof window !== "undefined" ? window.location.origin : "";
+      const urlPublica = `${origem}/acompanhar/${token}`;
+
+      let copiou = false;
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(urlPublica);
+          copiou = true;
+        } catch {
+          copiou = false;
+        }
+      }
+
+      setOsLinkModal({ os, url: urlPublica, copiado: copiou });
+    } catch (error) {
+      console.error("Erro ao gerar link do cliente:", error);
+      alert("Não foi possível gerar o link de acompanhamento. Verifique as regras do Firestore.");
+    }
+  };
 
   const registrarAuditoria = (acao: string) => ({
     acao, data: new Date().toISOString(), usuario: auth.currentUser?.email || "Usuário"
@@ -174,12 +255,25 @@ export default function Dashboard() {
     e.preventDefault();
     if (!osStatusModal) return;
     try {
+      const osAtual = listaOS.find(o => o.id === osStatusModal.id);
+      const token = osAtual?.tokenRastreio || gerarTokenRastreio();
       const osRef = doc(db, "ordens_servico", osStatusModal.id);
+
       await updateDoc(osRef, { 
         etapa: osStatusModal.acao,
         dataFinalizacao: osStatusModal.data,
+        tokenRastreio: token,
         historico: arrayUnion(registrarAuditoria(`Alterou status para: ${osStatusModal.acao} em ${osStatusModal.data}`))
       });
+
+      if (osAtual) {
+        await sincronizarRastreioPublico(token, {
+          numeroOS: osAtual.numeroOS,
+          cliente: osAtual.cliente,
+          etapa: osStatusModal.acao,
+          dataInstalacao: osAtual.dataInstalacao
+        });
+      }
     } catch (error) {
       console.error(error);
       alert("Erro ao atualizar o status.");
@@ -192,7 +286,11 @@ export default function Dashboard() {
     e.preventDefault();
     if (senhaExclusao === "*@Solar123" && osParaExcluir) {
       try {
+        const osExcluida = listaOS.find(o => o.id === osParaExcluir);
         await deleteDoc(doc(db, "ordens_servico", osParaExcluir));
+        if (osExcluida?.tokenRastreio) {
+          await deleteDoc(doc(db, "rastreio_publico", osExcluida.tokenRastreio)).catch(() => {});
+        }
         alert("Ordem de Serviço excluída com sucesso!");
       } catch (error) {
         console.error(error);
@@ -216,11 +314,24 @@ export default function Dashboard() {
     const osId = e.dataTransfer.getData("osId");
     const etapaAtual = e.dataTransfer.getData("etapaAtual");
     if (osId && etapaAtual !== novaEtapa) {
+      const osAtual = listaOS.find(o => o.id === osId);
+      const token = osAtual?.tokenRastreio || gerarTokenRastreio();
       const osRef = doc(db, "ordens_servico", osId);
+
       await updateDoc(osRef, { 
         etapa: novaEtapa,
+        tokenRastreio: token,
         historico: arrayUnion(registrarAuditoria(`Moveu de "${etapaAtual}" para "${novaEtapa}"`))
       });
+
+      if (osAtual) {
+        await sincronizarRastreioPublico(token, {
+          numeroOS: osAtual.numeroOS,
+          cliente: osAtual.cliente,
+          etapa: novaEtapa,
+          dataInstalacao: osAtual.dataInstalacao
+        });
+      }
     }
   };
 
@@ -241,20 +352,38 @@ export default function Dashboard() {
     e.preventDefault();
     try {
       if (editandoId) {
+        const token = novaOS.tokenRastreio || gerarTokenRastreio();
         const osRef = doc(db, "ordens_servico", editandoId);
         await updateDoc(osRef, {
           ...novaOS,
+          tokenRastreio: token,
           historico: arrayUnion(registrarAuditoria("Editou as informações da OS"))
+        });
+
+        await sincronizarRastreioPublico(token, {
+          numeroOS: novaOS.numeroOS,
+          cliente: novaOS.cliente,
+          etapa: novaOS.etapa || "Pré Contrato Vist.",
+          dataInstalacao: novaOS.dataInstalacao
         });
       } else {
         const proximoNumero = listaOS.length > 0 ? Math.max(...listaOS.map(o => o.numeroOS || 0)) + 1 : 1;
+        const novoToken = gerarTokenRastreio();
         await addDoc(collection(db, "ordens_servico"), {
           ...novaOS,
           numeroOS: proximoNumero,
+          tokenRastreio: novoToken,
           etapa: "Pré Contrato Vist.",
           dataCriacao: new Date().toISOString(),
           historico: [registrarAuditoria("Criou a OS")],
           anexos: []
+        });
+
+        await sincronizarRastreioPublico(novoToken, {
+          numeroOS: proximoNumero,
+          cliente: novaOS.cliente,
+          etapa: "Pré Contrato Vist.",
+          dataInstalacao: novaOS.dataInstalacao
         });
       }
       setNovaOS(valorInicialOS);
@@ -311,11 +440,24 @@ export default function Dashboard() {
   };
 
   const repatriarOS = async (osId: string) => {
+    const osAtual = listaOS.find(o => o.id === osId);
+    const token = osAtual?.tokenRastreio || gerarTokenRastreio();
     const osRef = doc(db, "ordens_servico", osId);
+
     await updateDoc(osRef, { 
       etapa: "Inserir Documentos",
+      tokenRastreio: token,
       historico: arrayUnion(registrarAuditoria(`Repatriou a OS para "Inserir Documentos"`))
     });
+
+    if (osAtual) {
+      await sincronizarRastreioPublico(token, {
+        numeroOS: osAtual.numeroOS,
+        cliente: osAtual.cliente,
+        etapa: "Inserir Documentos",
+        dataInstalacao: osAtual.dataInstalacao
+      });
+    }
   };
 
   const abrirDRE = () => {
@@ -618,11 +760,12 @@ export default function Dashboard() {
         <div className="flex gap-1 items-center mt-2">
           <button 
             onClick={() => setExpandido(!expandido)}
-            className="flex-1 text-blue-600 font-bold hover:underline bg-gray-50 py-1 rounded border border-gray-100 text-[10px] text-center"
+            className="flex-1 text-blue-600 font-bold hover:underline bg-gray-50 py-1 px-1 rounded border border-gray-100 text-[9.5px] text-center whitespace-nowrap"
           >
             {expandido ? "▲ Ocultar" : "▼ Expandir"}
           </button>
-          <div className="flex gap-1 shrink-0 bg-gray-50 p-1 rounded-sm border border-gray-100 items-center">
+          <div className="flex gap-[3px] shrink-0 bg-gray-50 p-1 rounded-sm border border-gray-100 items-center">
+            <button type="button" title="Link de Acompanhamento (Cliente)" onClick={() => abrirLinkCliente(os)}><IconeLink /></button>
             <button type="button" title="Editar OS" onClick={() => abrirEdicaoOS(os)}><IconeLapis /></button>
             <button type="button" title="Finalizar" onClick={() => setOsStatusModal({ id: os.id, acao: "Finalizada", data: new Date().toISOString().split("T")[0] })}><IconeCheck /></button>
             <button type="button" title="Cancelar" onClick={() => setOsStatusModal({ id: os.id, acao: "Cancelada", data: new Date().toISOString().split("T")[0] })}><IconeCancel /></button>
@@ -652,6 +795,7 @@ export default function Dashboard() {
          <div className="w-20 text-gray-500">{os.dataFinalizacao ? new Date(os.dataFinalizacao + "T12:00:00").toLocaleDateString('pt-BR') : "-"}</div>
          
          <div className="flex gap-1 items-center md:ml-auto">
+           <button onClick={() => abrirLinkCliente(os)} title="Link do Cliente" className="bg-indigo-50 border text-indigo-600 p-1 rounded font-bold hover:bg-indigo-100"><IconeLink /></button>
            <button onClick={() => setOsHistorico(os)} title="Histórico" className="bg-blue-50 border text-blue-600 p-1 rounded font-bold hover:bg-blue-100"><IconeLivro /></button>
            <button onClick={() => repatriarOS(os.id)} title="Repatriar OS" className="bg-gray-100 border text-gray-700 p-1 rounded font-bold hover:bg-gray-200"><IconeRepatriar /></button>
            <button onClick={() => setOsParaExcluir(os.id)} title="Excluir Definitivamente" className="bg-red-100 border text-red-700 p-1 rounded font-bold hover:bg-red-200"><IconeLixeira /></button>
@@ -813,6 +957,80 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* MODAL: LINK DE ACOMPANHAMENTO DO CLIENTE 🔗 */}
+      {osLinkModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[80] text-xs"
+          onClick={() => setOsLinkModal(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-md p-5 border-t-4 border-indigo-600"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-2 mb-3">
+              <h2 className="font-bold text-indigo-900 text-sm flex items-center gap-1.5">
+                <IconeLink /> Link de Acompanhamento — {osLinkModal.os.numeroOS ? `OS ${osLinkModal.os.numeroOS}` : osLinkModal.os.cliente}
+              </h2>
+              <button onClick={() => setOsLinkModal(null)} className="text-red-500 font-bold text-lg hover:scale-110">&times;</button>
+            </div>
+
+            <p className="text-gray-600 mb-3 text-[11px] leading-relaxed">
+              Envie este link exclusivo para <strong>{osLinkModal.os.cliente}</strong> acompanhar a evolução da obra em tempo real. Todos os dados financeiros e internos ficam 100% ocultos.
+            </p>
+
+            <div className="bg-slate-50 border border-slate-300 rounded p-2 mb-3 flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={osLinkModal.url}
+                onFocus={(e) => e.target.select()}
+                className="w-full bg-transparent text-slate-800 font-mono text-[11px] focus:outline-none"
+              />
+            </div>
+
+            {osLinkModal.copiado && (
+              <p className="text-emerald-700 font-bold text-[11px] mb-3 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded">
+                ✓ Link copiado para a área de transferência!
+              </p>
+            )}
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof navigator !== "undefined" && navigator.clipboard) {
+                    await navigator.clipboard.writeText(osLinkModal.url);
+                    setOsLinkModal({ ...osLinkModal, copiado: true });
+                  }
+                }}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded shadow-sm transition"
+              >
+                📋 Copiar Link
+              </button>
+
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(
+                  `Olá! Acompanhe o andamento da sua instalação solar (${osLinkModal.os.numeroOS ? `OS #${osLinkModal.os.numeroOS} - ` : ""}${osLinkModal.os.cliente}) em tempo real pelo link: ${osLinkModal.url}`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded shadow-sm transition inline-flex items-center gap-1"
+              >
+                💬 Enviar no WhatsApp
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setOsLinkModal(null)}
+                className="px-3 py-1.5 border rounded bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: PESQUISA GLOBAL DE OS (LUPA) */}
       {buscaModalAberto && (
         <div
@@ -897,6 +1115,13 @@ export default function Dashboard() {
                       </div>
 
                       <div className="flex md:flex-col justify-end gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => { setBuscaModalAberto(false); abrirLinkCliente(os); }}
+                          className="px-2.5 py-1 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded font-bold hover:bg-indigo-100 flex items-center gap-1"
+                        >
+                          <IconeLink /> Link Cliente
+                        </button>
                         <button
                           type="button"
                           onClick={() => { setBuscaModalAberto(false); abrirEdicaoOS(os); }}
