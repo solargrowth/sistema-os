@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db, storage } from "../../lib/firebase";
 import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
@@ -125,10 +125,12 @@ export default function Dashboard() {
   const [osAnexos, setOsAnexos] = useState<any | null>(null);
   const [osLinkModal, setOsLinkModal] = useState<{ os: any; url: string; copiado: boolean } | null>(null);
   
-  // Estados para Upload e Exclusão de Anexos
-  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);
+  // Estados para Upload Múltiplo e Exclusão de Anexos
+  const [arquivosSelecionados, setArquivosSelecionados] = useState<File[]>([]);
   const [enviandoAnexo, setEnviandoAnexo] = useState(false);
+  const [progressoAnexo, setProgressoAnexo] = useState("");
   const [excluindoAnexo, setExcluindoAnexo] = useState<string | null>(null);
+  const inputArquivoRef = useRef<HTMLInputElement | null>(null);
   
   const [osStatusModal, setOsStatusModal] = useState<{ id: string, acao: string, data: string } | null>(null);
   const [dreModal, setDreModal] = useState(false);
@@ -398,35 +400,54 @@ export default function Dashboard() {
   };
 
   const enviarAnexo = async () => {
-    if (arquivoSelecionado && osAnexos) {
+    if (arquivosSelecionados.length > 0 && osAnexos) {
       setEnviandoAnexo(true);
-      try {
-        const arquivo = arquivoSelecionado;
-        const nomeArquivo = arquivo.name;
-        const storageRef = ref(storage, `anexos_os/${osAnexos.id}/${nomeArquivo}`);
-        await uploadBytes(storageRef, arquivo);
-        const urlDownload = await getDownloadURL(storageRef);
+      const novosAnexos: any[] = [];
+      const novosHistoricos: any[] = [];
 
-        const novoAnexo = { 
-          nome: nomeArquivo, 
-          url: urlDownload, 
-          data: new Date().toISOString(), 
-          usuario: auth.currentUser?.email 
-        };
-        
+      try {
+        for (let i = 0; i < arquivosSelecionados.length; i++) {
+          const arquivo = arquivosSelecionados[i];
+          const nomeArquivo = arquivo.name;
+          setProgressoAnexo(`Enviando ${i + 1} de ${arquivosSelecionados.length}...`);
+
+          const storageRef = ref(storage, `anexos_os/${osAnexos.id}/${nomeArquivo}`);
+          await uploadBytes(storageRef, arquivo);
+          const urlDownload = await getDownloadURL(storageRef);
+
+          novosAnexos.push({
+            nome: nomeArquivo,
+            url: urlDownload,
+            data: new Date().toISOString(),
+            usuario: auth.currentUser?.email
+          });
+
+          novosHistoricos.push(registrarAuditoria(`Anexou arquivo: ${nomeArquivo}`));
+        }
+
         const osRef = doc(db, "ordens_servico", osAnexos.id);
         await updateDoc(osRef, {
-          anexos: arrayUnion(novoAnexo),
-          historico: arrayUnion(registrarAuditoria(`Anexou arquivo: ${nomeArquivo}`))
+          anexos: arrayUnion(...novosAnexos),
+          historico: arrayUnion(...novosHistoricos)
         });
-        
-        setOsAnexos({ ...osAnexos, anexos: [...(osAnexos.anexos || []), novoAnexo] });
-        setArquivoSelecionado(null);
+
+        setOsAnexos({ ...osAnexos, anexos: [...(osAnexos.anexos || []), ...novosAnexos] });
+        setArquivosSelecionados([]);
+        if (inputArquivoRef.current) inputArquivoRef.current.value = "";
       } catch (error) {
-        console.error("Erro ao salvar anexo", error);
-        alert("Erro ao fazer upload do arquivo. Verifique se as regras do Storage estão em Modo de Teste.");
+        console.error("Erro ao salvar anexos", error);
+        if (novosAnexos.length > 0) {
+          const osRef = doc(db, "ordens_servico", osAnexos.id);
+          await updateDoc(osRef, {
+            anexos: arrayUnion(...novosAnexos),
+            historico: arrayUnion(...novosHistoricos)
+          }).catch(() => {});
+          setOsAnexos({ ...osAnexos, anexos: [...(osAnexos.anexos || []), ...novosAnexos] });
+        }
+        alert("Erro ao fazer upload de um ou mais arquivos. Verifique sua conexão ou as regras do Storage.");
       } finally {
         setEnviandoAnexo(false);
+        setProgressoAnexo("");
       }
     }
   };
@@ -1609,30 +1630,74 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* POPUP: ANEXOS ATUALIZADO 📎 */}
+      {/* POPUP: ANEXOS MÚLTIPLOS 📎 */}
       {osAnexos && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[70]">
           <div className="bg-white rounded shadow-xl w-full max-w-sm p-4">
             <div className="flex justify-between items-center border-b pb-2 mb-4">
               <h2 className="font-bold text-gray-800 text-sm">Arquivos: {osAnexos.cliente}</h2>
-              <button onClick={() => setOsAnexos(null)} className="text-red-500 font-bold text-lg">&times;</button>
+              <button
+                onClick={() => {
+                  setOsAnexos(null);
+                  setArquivosSelecionados([]);
+                  if (inputArquivoRef.current) inputArquivoRef.current.value = "";
+                }}
+                className="text-red-500 font-bold text-lg"
+              >
+                &times;
+              </button>
             </div>
             
             <div className="mb-4 bg-gray-50 p-3 border rounded shadow-sm">
-              <label className="block text-xs font-bold text-gray-700 mb-2">Enviar novo arquivo (Cloud):</label>
+              <label className="block text-xs font-bold text-gray-700 mb-2">Enviar novos arquivos (selecione 1 ou vários):</label>
               <div className="flex flex-col gap-2">
                 <input 
+                  ref={inputArquivoRef}
                   type="file" 
-                  onChange={(e) => setArquivoSelecionado(e.target.files ? e.target.files[0] : null)} 
+                  multiple
+                  onChange={(e) => setArquivosSelecionados(e.target.files ? Array.from(e.target.files) : [])} 
                   className="text-xs border p-1 rounded w-full text-black bg-white" 
                 />
+
+                {arquivosSelecionados.length > 0 && (
+                  <div className="bg-white border border-blue-200 rounded p-2 space-y-1 max-h-28 overflow-y-auto">
+                    <p className="text-[10px] font-bold text-blue-800">
+                      {arquivosSelecionados.length} {arquivosSelecionados.length === 1 ? "arquivo selecionado:" : "arquivos selecionados:"}
+                    </p>
+                    {arquivosSelecionados.map((arq, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-1 text-[10px] text-gray-700 bg-blue-50/60 px-1.5 py-0.5 rounded">
+                        <span className="truncate">📎 {arq.name}</span>
+                        <button
+                          type="button"
+                          disabled={enviandoAnexo}
+                          onClick={() => {
+                            const filtrados = arquivosSelecionados.filter((_, i) => i !== idx);
+                            setArquivosSelecionados(filtrados);
+                            if (filtrados.length === 0 && inputArquivoRef.current) {
+                              inputArquivoRef.current.value = "";
+                            }
+                          }}
+                          className="text-red-500 hover:text-red-700 font-bold shrink-0 px-1 disabled:opacity-40"
+                          title="Remover da fila"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <button 
                   type="button" 
                   onClick={enviarAnexo} 
-                  disabled={!arquivoSelecionado || enviandoAnexo} 
-                  className={`text-white font-bold py-1.5 rounded text-xs transition ${!arquivoSelecionado || enviandoAnexo ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"}`}
+                  disabled={arquivosSelecionados.length === 0 || enviandoAnexo} 
+                  className={`text-white font-bold py-1.5 rounded text-xs transition ${arquivosSelecionados.length === 0 || enviandoAnexo ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"}`}
                 >
-                  {enviandoAnexo ? "Enviando para a nuvem..." : "Confirmar e Anexar ⇧"}
+                  {enviandoAnexo
+                    ? (progressoAnexo || "Enviando para a nuvem...")
+                    : arquivosSelecionados.length > 1
+                      ? `Confirmar e Anexar (${arquivosSelecionados.length} arquivos) ⇧`
+                      : "Confirmar e Anexar ⇧"}
                 </button>
               </div>
             </div>
