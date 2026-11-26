@@ -131,6 +131,7 @@ export default function Dashboard() {
   const [progressoAnexo, setProgressoAnexo] = useState("");
   const [excluindoAnexo, setExcluindoAnexo] = useState<string | null>(null);
   const inputArquivoRef = useRef<HTMLInputElement | null>(null);
+  const tokensSincronizadosRef = useRef<Set<string>>(new Set());
   
   const [osStatusModal, setOsStatusModal] = useState<{ id: string, acao: string, data: string } | null>(null);
   const [dreModal, setDreModal] = useState(false);
@@ -154,7 +155,8 @@ export default function Dashboard() {
     valorCA: "", caCheck: false, caCheck1: false, caCheck2: false, dataCA1: "", dataCA2: "",
     valorPS: "", psCheck1: false, psCheck2: false, dataPS1: "", dataPS2: "",
     valorUS: "", usCheck: false, usCheck1: false, usCheck2: false, dataUS1: "", dataUS2: "",
-    valorDMS: "", dmsCheck: false, numeroOS: 0, tokenRastreio: "", etapa: "Pré Contrato Vist."
+    valorDMS: "", dmsCheck: false, numeroOS: 0, tokenRastreio: "", etapa: "Pré Contrato Vist.",
+    dataCriacao: "", dataFinalizacao: ""
   };
 
   const [novaOS, setNovaOS] = useState(valorInicialOS);
@@ -164,48 +166,82 @@ export default function Dashboard() {
     router.push("/");
   };
 
-  useEffect(() => {
-    const notifSalva = localStorage.getItem("ultimaNotificacaoLida");
-    if (notifSalva) setUltimaNotificacaoLida(notifSalva);
-
-    const unsub = onSnapshot(collection(db, "ordens_servico"), (snapshot) => {
-      const ordens = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setListaOS(ordens);
-    });
-    return () => unsub();
-  }, []);
-
-  // Sincroniza apenas os dados públicos não-sensíveis para o link do cliente
+  // Sincroniza apenas os dados públicos não-sensíveis para o link do cliente, preservando a data de criação fixa
   const sincronizarRastreioPublico = async (
     token: string,
-    dados: { numeroOS?: number; cliente?: string; etapa?: string; dataInstalacao?: string }
+    dados: {
+      numeroOS?: number;
+      cliente?: string;
+      etapa?: string;
+      dataInstalacao?: string;
+      dataCriacao?: string;
+      dataFinalizacao?: string;
+    }
   ) => {
     if (!token) return;
     try {
-      await setDoc(
-        doc(db, "rastreio_publico", token),
-        {
-          numeroOS: dados.numeroOS || 0,
-          cliente: dados.cliente || "",
-          etapa: dados.etapa || "Pré Contrato Vist.",
-          dataInstalacao: dados.dataInstalacao || "",
-          atualizadoEm: new Date().toISOString()
-        },
-        { merge: true }
-      );
+      const payload: Record<string, any> = {
+        numeroOS: dados.numeroOS || 0,
+        cliente: dados.cliente || "",
+        etapa: dados.etapa || "Pré Contrato Vist.",
+        dataInstalacao: dados.dataInstalacao || "",
+        atualizadoEm: new Date().toISOString()
+      };
+
+      if (dados.dataCriacao) {
+        payload.dataCriacao = dados.dataCriacao;
+      }
+
+      if (dados.dataFinalizacao !== undefined) {
+        payload.dataFinalizacao = dados.dataFinalizacao;
+      }
+
+      await setDoc(doc(db, "rastreio_publico", token), payload, { merge: true });
     } catch (error) {
       console.error("Erro ao sincronizar rastreio público:", error);
     }
   };
 
-  // Garante que a OS possua um token (inclusive OSs antigas) e abre o modal com o link público
+  useEffect(() => {
+    const notifSalva = localStorage.getItem("ultimaNotificacaoLida");
+    if (notifSalva) setUltimaNotificacaoLida(notifSalva);
+
+    const unsub = onSnapshot(collection(db, "ordens_servico"), (snapshot) => {
+      const ordens: any[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setListaOS(ordens);
+
+      // Garante que links públicos já existentes recebam a dataCriacao original da OS
+      ordens.forEach((os) => {
+        if (os.tokenRastreio && !tokensSincronizadosRef.current.has(os.tokenRastreio)) {
+          tokensSincronizadosRef.current.add(os.tokenRastreio);
+          const dataCriacaoFixa = os.dataCriacao || os.historico?.[0]?.data || "";
+          if (dataCriacaoFixa) {
+            sincronizarRastreioPublico(os.tokenRastreio, {
+              numeroOS: os.numeroOS,
+              cliente: os.cliente,
+              etapa: os.etapa,
+              dataInstalacao: os.dataInstalacao,
+              dataCriacao: dataCriacaoFixa,
+              dataFinalizacao: os.dataFinalizacao || ""
+            });
+          }
+        }
+      });
+    });
+    return () => unsub();
+  }, []);
+
+  // Garante que a OS possua um token e dataCriacao fixa, abrindo o modal com o link público
   const abrirLinkCliente = async (os: any) => {
     try {
       let token = os.tokenRastreio;
-      if (!token) {
-        token = gerarTokenRastreio();
+      const dataCriacaoOS = os.dataCriacao || os.historico?.[0]?.data || new Date().toISOString();
+
+      if (!token || !os.dataCriacao) {
+        if (!token) token = gerarTokenRastreio();
         await updateDoc(doc(db, "ordens_servico", os.id), {
-          tokenRastreio: token
+          tokenRastreio: token,
+          dataCriacao: dataCriacaoOS
         });
       }
 
@@ -213,7 +249,9 @@ export default function Dashboard() {
         numeroOS: os.numeroOS,
         cliente: os.cliente,
         etapa: os.etapa,
-        dataInstalacao: os.dataInstalacao
+        dataInstalacao: os.dataInstalacao,
+        dataCriacao: dataCriacaoOS,
+        dataFinalizacao: os.dataFinalizacao || ""
       });
 
       const origem = typeof window !== "undefined" ? window.location.origin : "";
@@ -260,12 +298,14 @@ export default function Dashboard() {
     try {
       const osAtual = listaOS.find(o => o.id === osStatusModal.id);
       const token = osAtual?.tokenRastreio || gerarTokenRastreio();
+      const dataCriacaoFixa = osAtual?.dataCriacao || osAtual?.historico?.[0]?.data || "";
       const osRef = doc(db, "ordens_servico", osStatusModal.id);
 
       await updateDoc(osRef, { 
         etapa: osStatusModal.acao,
         dataFinalizacao: osStatusModal.data,
         tokenRastreio: token,
+        ...(dataCriacaoFixa ? { dataCriacao: dataCriacaoFixa } : {}),
         historico: arrayUnion(registrarAuditoria(`Alterou status para: ${osStatusModal.acao} em ${osStatusModal.data}`))
       });
 
@@ -274,7 +314,9 @@ export default function Dashboard() {
           numeroOS: osAtual.numeroOS,
           cliente: osAtual.cliente,
           etapa: osStatusModal.acao,
-          dataInstalacao: osAtual.dataInstalacao
+          dataInstalacao: osAtual.dataInstalacao,
+          dataCriacao: dataCriacaoFixa,
+          dataFinalizacao: osStatusModal.data
         });
       }
     } catch (error) {
@@ -319,11 +361,13 @@ export default function Dashboard() {
     if (osId && etapaAtual !== novaEtapa) {
       const osAtual = listaOS.find(o => o.id === osId);
       const token = osAtual?.tokenRastreio || gerarTokenRastreio();
+      const dataCriacaoFixa = osAtual?.dataCriacao || osAtual?.historico?.[0]?.data || "";
       const osRef = doc(db, "ordens_servico", osId);
 
       await updateDoc(osRef, { 
         etapa: novaEtapa,
         tokenRastreio: token,
+        ...(dataCriacaoFixa ? { dataCriacao: dataCriacaoFixa } : {}),
         historico: arrayUnion(registrarAuditoria(`Moveu de "${etapaAtual}" para "${novaEtapa}"`))
       });
 
@@ -332,7 +376,9 @@ export default function Dashboard() {
           numeroOS: osAtual.numeroOS,
           cliente: osAtual.cliente,
           etapa: novaEtapa,
-          dataInstalacao: osAtual.dataInstalacao
+          dataInstalacao: osAtual.dataInstalacao,
+          dataCriacao: dataCriacaoFixa,
+          dataFinalizacao: osAtual.dataFinalizacao || ""
         });
       }
     }
@@ -355,11 +401,19 @@ export default function Dashboard() {
     e.preventDefault();
     try {
       if (editandoId) {
-        const token = novaOS.tokenRastreio || gerarTokenRastreio();
+        const osOriginal = listaOS.find(o => o.id === editandoId);
+        const token = novaOS.tokenRastreio || osOriginal?.tokenRastreio || gerarTokenRastreio();
+        const dataCriacaoFixa =
+          novaOS.dataCriacao ||
+          osOriginal?.dataCriacao ||
+          osOriginal?.historico?.[0]?.data ||
+          new Date().toISOString();
+
         const osRef = doc(db, "ordens_servico", editandoId);
         await updateDoc(osRef, {
           ...novaOS,
           tokenRastreio: token,
+          dataCriacao: dataCriacaoFixa,
           historico: arrayUnion(registrarAuditoria("Editou as informações da OS"))
         });
 
@@ -367,17 +421,21 @@ export default function Dashboard() {
           numeroOS: novaOS.numeroOS,
           cliente: novaOS.cliente,
           etapa: novaOS.etapa || "Pré Contrato Vist.",
-          dataInstalacao: novaOS.dataInstalacao
+          dataInstalacao: novaOS.dataInstalacao,
+          dataCriacao: dataCriacaoFixa,
+          dataFinalizacao: novaOS.dataFinalizacao || ""
         });
       } else {
         const proximoNumero = listaOS.length > 0 ? Math.max(...listaOS.map(o => o.numeroOS || 0)) + 1 : 1;
         const novoToken = gerarTokenRastreio();
+        const dataCriacaoNova = new Date().toISOString();
+
         await addDoc(collection(db, "ordens_servico"), {
           ...novaOS,
           numeroOS: proximoNumero,
           tokenRastreio: novoToken,
           etapa: "Pré Contrato Vist.",
-          dataCriacao: new Date().toISOString(),
+          dataCriacao: dataCriacaoNova,
           historico: [registrarAuditoria("Criou a OS")],
           anexos: []
         });
@@ -386,7 +444,9 @@ export default function Dashboard() {
           numeroOS: proximoNumero,
           cliente: novaOS.cliente,
           etapa: "Pré Contrato Vist.",
-          dataInstalacao: novaOS.dataInstalacao
+          dataInstalacao: novaOS.dataInstalacao,
+          dataCriacao: dataCriacaoNova,
+          dataFinalizacao: ""
         });
       }
       setNovaOS(valorInicialOS);
@@ -500,11 +560,13 @@ export default function Dashboard() {
   const repatriarOS = async (osId: string) => {
     const osAtual = listaOS.find(o => o.id === osId);
     const token = osAtual?.tokenRastreio || gerarTokenRastreio();
+    const dataCriacaoFixa = osAtual?.dataCriacao || osAtual?.historico?.[0]?.data || "";
     const osRef = doc(db, "ordens_servico", osId);
 
     await updateDoc(osRef, { 
       etapa: "Inserir Documentos",
       tokenRastreio: token,
+      ...(dataCriacaoFixa ? { dataCriacao: dataCriacaoFixa } : {}),
       historico: arrayUnion(registrarAuditoria(`Repatriou a OS para "Inserir Documentos"`))
     });
 
@@ -513,7 +575,9 @@ export default function Dashboard() {
         numeroOS: osAtual.numeroOS,
         cliente: osAtual.cliente,
         etapa: "Inserir Documentos",
-        dataInstalacao: osAtual.dataInstalacao
+        dataInstalacao: osAtual.dataInstalacao,
+        dataCriacao: dataCriacaoFixa,
+        dataFinalizacao: ""
       });
     }
   };
